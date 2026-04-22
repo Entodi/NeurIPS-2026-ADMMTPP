@@ -150,7 +150,7 @@ Within this framework we compare three tokenization granularities, visit-level, 
 \begin{itemize}[leftmargin=*,itemsep=2pt,topsep=2pt]
     \item A generative representation learning framework for longitudinal clinical records in which a pretrained LLM backbone parameterizes an MTPP through autoregressive token prediction, with a formal link from token-level cross-entropy to the MTPP log-likelihood (§\ref{sec:problem}).
     \item Three tokenization variants, visit, modality, and atomic-event, that trade context length against supervision density at otherwise identical backbone, adaptation, and training objective (§\ref{sec:tokenization}).
-    \item An empirical study on two ADRD cohorts from different sources, the TADPOLE subset of ADNI~\citep{adni,marinescu2019tadpole} and the tertiary-care EHR dataset EDUCATE~\citep{arnrich2024meds}, jointly ablating tokenization granularity and an optional Hawkes regularizer on the backbone's hidden states (§\ref{sec:regularization}) at fixed backbone, adaptation, and training recipe.
+    \item An empirical study on two ADRD cohorts from different sources, the TADPOLE subset of ADNI~\citep{adni,marinescu2019tadpole} and the tertiary-care EHR dataset EDUCATE~\citep{arnrich2024medical}, jointly ablating tokenization granularity and an optional Hawkes regularizer on the backbone's hidden states (§\ref{sec:regularization}) at fixed backbone, adaptation, and training recipe.
     The present paper reports diagnosis prediction on TADPOLE; the remaining TADPOLE tasks and the EDUCATE cohort are laid out to set the scope of the formulation and are left for future work (§\ref{sec:experiments}).
 \end{itemize}
 
@@ -267,7 +267,9 @@ DX=CN\ \eoe\newline
 Hipp=6500\textbar Vent=48000\textbar\newline
 MMSE=27\textbar ADAS=15\textbar\newline
 DX=MCI\ \eoe\newline
-\ttoken{TASK\_DX}\ \ttoken{h=12m}
+\ttoken{TASK\_DX}\ \ttoken{h=12m}\newline
+\rmfamily\textit{\scriptsize\,-- target --}\newline
+\ttfamily AD
 &
 \ttfamily
 \bos\ age=72,sex=F\newline
@@ -279,7 +281,9 @@ Hipp=6500\textbar Vent=48000\ \eoe\newline
 \soe\ \ttoken{t=12m}\ \ttoken{COG}\newline
 MMSE=27\textbar ADAS=15\ \eoe\newline
 \soe\ \ttoken{t=12m}\ \ttoken{DX}\ MCI\ \eoe\newline
-\ttoken{TASK\_DX}\ \ttoken{h=12m}
+\ttoken{TASK\_DX}\ \ttoken{h=12m}\newline
+\rmfamily\textit{\scriptsize\,-- target --}\newline
+\ttfamily AD
 &
 \ttfamily
 \bos\ age=72,sex=F\newline
@@ -291,7 +295,9 @@ MMSE=27\textbar ADAS=15\ \eoe\newline
 \soe\ \ttoken{t=12m}\ \ttoken{MMSE}\ 27\ \eoe\newline
 \soe\ \ttoken{t=12m}\ \ttoken{ADAS}\ 15\ \eoe\newline
 \soe\ \ttoken{t=12m}\ \ttoken{DX}\ MCI\ \eoe\newline
-\ttoken{TASK\_DX}\ \ttoken{h=12m}
+\ttoken{TASK\_DX}\ \ttoken{h=12m}\newline
+\rmfamily\textit{\scriptsize\,-- target --}\newline
+\ttfamily AD
 \\
 \midrule
 \multicolumn{1}{@{}l}{\textit{shortest context}} &
@@ -299,7 +305,7 @@ MMSE=27\textbar ADAS=15\ \eoe\newline
 \multicolumn{1}{l@{}}{\textit{densest supervision}} \\
 \bottomrule
 \end{tabular}
-\caption{Two-visit patient history under the three granularities, each followed by the shared task prompt \ttoken{TASK\_DX}\ \ttoken{h=12m}. Visit~1 at $t{=}0$ has no cognitive scores; modality-level (M) drops the \ttoken{COG} sub-event, while (V) and (A) drop the missing features in place. All three share the template of Eq.~\eqref{eq:template} and differ only in how $E(\mathbf{x}_k)$ is decomposed.}
+\caption{Two-visit patient history under the three granularities. Visit~1 at $t{=}0$ has no cognitive scores; modality-level (M) drops the \ttoken{COG} sub-event, while (V) and (A) drop the missing features in place. All three share the template of Eq.~\eqref{eq:template} and differ only in how $E(\mathbf{x}_k)$ is decomposed. The trailing task prompt \ttoken{TASK\_DX}\,\ttoken{h=12m} and the target response (here \texttt{AD}) are used only in Stage~2 supervised fine-tuning (\S\ref{sec:training}), where the cross-entropy loss is restricted to the response tokens; Stage~1 continued pretraining uses only the history portion, ending at the final \eoe\ of the last observed visit.}
 \label{fig:granularity}
 \end{figure}
 
@@ -396,7 +402,7 @@ Given a history $\Hcal_k$ and horizon $h>0$, we define five prediction tasks on 
 Experiments in this paper report diagnosis; the remaining four are reserved for future work.
 
 \paragraph{EDUCATE.}
-EDUCATE is a tertiary-care electronic health record dataset covering dementia and related disorders, harmonized to OMOP concepts and MEDS events \cite{arnrich2024meds}.
+EDUCATE is a tertiary-care electronic health record dataset covering dementia and related disorders, harmonized to OMOP concepts and MEDS events \cite{arnrich2024medical}.
 Each patient has an irregular stream of diagnosis, laboratory, medication, and procedure events with absolute timestamps.
 Four prediction tasks are defined on EDUCATE: binary healthy/non-healthy classification on the full history, five-way class (AD, MCI, FTD, DLB, other) restricted to non-healthy patients, inter-visit interval $\tau_{k+1}$, and multi-step trajectory generation.
 Because diagnosis codes directly encode the class labels, the two classification tasks are additionally evaluated with a \emph{leak-safe} preprocess that removes all dementia/ADRD ICD-10 prefixes (G30, G31, F00--F03, $\ldots$) and SNOMED/text mentions at load time; gaps between the two preprocess variants quantify code-level leakage.
