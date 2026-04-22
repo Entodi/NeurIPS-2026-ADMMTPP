@@ -386,49 +386,17 @@ An optional augmentation regime applies modality, feature-value, and history dro
 \subsection{Auxiliary-Head Objectives}
 \label{sec:regularization}
 
-The token-level objective of Eqs.~\eqref{eq:loss_s1}--\eqref{eq:loss_s2} treats inter-event time only through its surface form: the tokens of $T(\tau_k)$ appear in the loss exactly as any other symbol, and nothing in the objective forces the backbone's hidden states to encode time continuously or to respect the ordinal structure of diagnosis.
-To probe which, if any, of these inductive biases help, we attach one \emph{optional} auxiliary head on the backbone representation during Stage~2.
-All heads share the combined objective
+The token-level objective of Eqs.~\eqref{eq:loss_s1}--\eqref{eq:loss_s2} treats inter-event time only through its surface form: the tokens of $T(\tau_k)$ appear in the loss exactly as any other symbol, and nothing forces the backbone's hidden states to encode time continuously or to respect the ordinal structure of diagnosis.
+To probe which inductive biases help, we attach one \emph{optional} auxiliary head on the backbone representation during Stage~2 under the combined objective
 \begin{equation}
     \mathcal{L} \;=\; \mathcal{L}_{\text{S2}} + \gamma\, \mathcal{L}_{\text{aux}},
     \label{eq:combined}
 \end{equation}
-with $\gamma$ linearly warmed from $0$ to $0.1$ over one epoch so that the text objective is established before the auxiliary head contributes gradients.
-Auxiliary heads are trained jointly with the text head but are \emph{not} used for generation. They shape the hidden states only through back-propagation.
-Ablations compare each tokenization variant across these heads, including a pure-text baseline ($\gamma=0$), at otherwise matched configurations.
+with $\gamma$ linearly warmed from $0$ to $0.1$ over one epoch so the text objective is established before the head contributes gradients.
+Heads are trained jointly with the text head but are not used at generation, and shape the hidden states only through back-propagation.
 
-\paragraph{Hawkes intensity head.}
-Attached on top of a tokenizer variant that additionally prepends summary temporal features (inter-event statistics) to the prompt.
-Small per-mark projections $(\mu_m, \alpha_m, \beta_m) = \mathrm{softplus}\bigl(W_{\{\mu,\alpha,\beta\},m}\, h_k\bigr)$ from the backbone's last hidden state $h_k$ at event positions parameterize a piecewise Hawkes intensity in the classical exponential-kernel form~\citep{hawkes1971spectra,shchur2021neural},
-\begin{equation}
-    \lambda_m(t \mid \Hcal_k)
-    \;=\; \mu_m + \!\!\sum_{j:\, t_j < t,\; m_j = m}\!\! (\alpha_m - \mu_m)\, e^{-\beta_m (t - t_j)},
-    \label{eq:hawkes}
-\end{equation}
-and $\mathcal{L}_{\text{aux}} = \mathcal{L}_{\text{NLL}}$ is the MTPP negative log-likelihood
-\begin{equation}
-    \mathcal{L}_{\text{NLL}}
-    \;=\; \int_0^{T} \sum_m \lambda_m(s)\, ds \;-\; \sum_{k=1}^{K} \log \lambda_{m_k}(t_k),
-    \label{eq:nll}
-\end{equation}
-computed in closed form: the compensator (the integrated intensity $\int_0^T\sum_m \lambda_m(s)\,ds$, which is the first term of Eq.~\eqref{eq:nll}) decomposes into a baseline term $T\sum_m \mu_m$ and a sum of per-event excitation integrals $\frac{\alpha_m - \mu_m}{\beta_m}\bigl(1 - e^{-\beta_m (T - t_j)}\bigr)$~\citep{ogata1981lewis}.
-The implementation follows the \texttt{PiecewiseHawkesIntensity} interface of OpenFIM~\citep{berghaus2026incontext}.
-
-\paragraph{Cox proportional-hazards head.}
-A log-hazard scalar $f(h_k)$ read from the last hidden state at each event position is trained under the Cox partial log-likelihood~\citep{cox1972regression},
-\begin{equation}
-    \mathcal{L}_{\text{Cox}}
-    \;=\; -\!\!\sum_{i:\, \delta_i=1}\!
-          \Bigl[\, f(h_{k_i}) \;-\; \log \!\!\!\sum_{j \in \mathcal{R}(t_i)}\!\!\! \exp\!\bigl(f(h_{k_j})\bigr) \,\Bigr],
-    \label{eq:coxph}
-\end{equation}
-where $\delta_i=1$ marks an observed class transition and $\mathcal{R}(t_i)$ is the risk set at time $t_i$.
-Within-batch ties are handled by the Breslow approximation~\citep{breslow1972contribution}.
-Two sub-variants are considered: an accumulated-risk-set form that buffers negatives across mini-batches~\citep{katzman2018deepsurv,kvamme2019time}, and an attention-pooled form in which $f$ reads an attention-weighted average over the history's hidden states rather than the last one, using the self-attentive pooling~\citep{lin2017structured}.
-
-\paragraph{Ordinal head.}
-Diagnosis labels admit a natural order CN\,$<$\,MCI\,$<$\,AD, so we additionally consider a two-logit ordinal head that minimizes cumulative binary cross-entropy on the thresholded predictions $P(d > \text{CN} \mid h_k)$ and $P(d > \text{MCI} \mid h_k)$, following the cumulative-link ordinal formulation~\citep{frank2001simple} and its deep-network version~\citep{niu2016ordinal}, which casts a $K$-class ordinal problem as $K{-}1$ binary predictions $P(d > c_k)$ at each class threshold.
-This head carries no timing information. It tests whether an order-aware classification signal, independent of point-process structure, suffices to shape the hidden states.
+We consider three families. A \emph{Hawkes intensity head} fits a classical exponential-kernel Hawkes process under closed-form MTPP negative log-likelihood~\citep{hawkes1971spectra,ogata1981lewis,shchur2021neural,berghaus2026incontext}. A \emph{Cox proportional-hazards head} is trained under the Cox partial log-likelihood~\citep{cox1972regression} with Breslow ties~\citep{breslow1972contribution}, in two sub-variants: accumulated risk sets across mini-batches~\citep{katzman2018deepsurv,kvamme2019time}, and an attention-pooled history~\citep{lin2017structured}. An \emph{ordinal head} exploits the CN\,$<$\,MCI\,$<$\,AD order via cumulative binary cross-entropy~\citep{frank2001simple,niu2016ordinal}, carries no timing information, and tests whether an order-aware classification signal alone suffices to shape the hidden states.
+Ablations compare each tokenization variant across these heads and a pure-text baseline ($\gamma=0$) at otherwise matched configurations. Full formulations are deferred to Appendix~\ref{app:aux_heads}.
 
 \section{Experiments}
 \label{sec:experiments}
@@ -507,8 +475,19 @@ Notation: $h_k \in \mathbb{R}^d$ is the backbone's last hidden state at event po
 The pure-text baseline sets $\mathcal{L}_{\text{aux}} = 0$ in Eq.~\eqref{eq:combined}, so Stage~2 optimizes only the response-token cross-entropy $\mathcal{L}_{\text{S2}}$ of Eq.~\eqref{eq:loss_s2}. The subsections below cover the five heads that specify a non-trivial $\mathcal{L}_{\text{aux}}$.
 
 \subsubsection{Hawkes NLL (closed form)}
-Small per-mark projections produce $(\mu_m^{(k)}, \alpha_m^{(k)}, \beta_m^{(k)}) = \mathrm{softplus}\bigl(W_{\{\mu,\alpha,\beta\},m}\, h_k\bigr)$ at every event position $k$.
-With the piecewise exponential intensity of Eq.~\eqref{eq:hawkes}, the compensator admits the closed form
+Small per-mark projections produce $(\mu_m^{(k)}, \alpha_m^{(k)}, \beta_m^{(k)}) = \mathrm{softplus}\bigl(W_{\{\mu,\alpha,\beta\},m}\, h_k\bigr)$ at every event position $k$, parameterizing a piecewise Hawkes intensity in the classical exponential-kernel form~\citep{hawkes1971spectra,shchur2021neural},
+\begin{equation}
+    \lambda_m(t \mid \Hcal_k)
+    \;=\; \mu_m + \!\!\sum_{j:\, t_j < t,\; m_j = m}\!\! (\alpha_m - \mu_m)\, e^{-\beta_m (t - t_j)}.
+    \label{eq:hawkes}
+\end{equation}
+The MTPP negative log-likelihood
+\begin{equation}
+    \mathcal{L}_{\text{NLL}}
+    \;=\; \int_0^{T} \sum_m \lambda_m(s)\, ds \;-\; \sum_{k=1}^{K} \log \lambda_{m_k}(t_k)
+    \label{eq:nll}
+\end{equation}
+is computed in closed form: the compensator admits
 \begin{equation}
     \int_0^T \lambda_m(s)\, ds
     \;=\; \mu_m^{(K)}\, T
@@ -517,8 +496,8 @@ With the piecewise exponential intensity of Eq.~\eqref{eq:hawkes}, the compensat
           \Bigl(1 - e^{-\beta_m^{(j)}(T - t_j)}\Bigr),
     \label{eq:hawkes_compensator}
 \end{equation}
-where $\mu_m^{(K)}$ is the baseline read off the last event.
-Summing over marks and subtracting the log-intensity at events yields $\mathcal{L}_{\text{NLL}}$ of Eq.~\eqref{eq:nll}~\citep{hawkes1971spectra,ogata1981lewis}.
+where $\mu_m^{(K)}$ is the baseline read off the last event~\citep{ogata1981lewis}.
+The implementation follows the \texttt{PiecewiseHawkesIntensity} interface of OpenFIM~\citep{berghaus2026incontext}.
 
 \subsubsection{Cox partial log-likelihood}
 A scalar log-hazard $f(h_k) = w^\top h_k + b$ is read off the last hidden state at each event position, with $w \in \mathbb{R}^d$ and $b \in \mathbb{R}$.
