@@ -144,13 +144,13 @@ Each patient history is serialized as a modality-tagged, delimited token sequenc
 In this setup, the conditional density of the next event is captured implicitly through the next-token distribution over that event's serialized tokens, and we show that next-token cross-entropy on the resulting serialization corresponds to a discretized MTPP negative log-likelihood up to tokenizer resolution.
 A single model, trained with continued pretraining followed by supervised fine-tuning, handles diagnosis classification, biomarker regression, inter-visit time prediction, and multi-step trajectory generation through the same next-token decoding step, without task-specific backbones.
 Because predictions are conditioned on the full serialized history, the model can adjust the effective weighting of modalities to each patient's current stage.
-Within this framework we compare three tokenization granularities, visit-level, modality-level, and atomic-event, to map the trade-off between context length and per-event supervision density at an otherwise identical backbone and training objective, and we evaluate an optional Hawkes intensity head as a time-aware regularizer on the learned representation.
+Within this framework we compare three tokenization granularities, visit-level, modality-level, and atomic-event, to map the trade-off between context length and per-event supervision density at an otherwise identical backbone and training objective, and we evaluate a set of optional auxiliary heads (Hawkes intensity, Cox partial hazard, ordinal diagnosis) as different ways of shaping the learned representation; none of the auxiliary heads is used for generation.
 
 \paragraph{Contributions.}
 \begin{itemize}[leftmargin=*,itemsep=2pt,topsep=2pt]
     \item A generative representation learning framework for longitudinal clinical records in which a pretrained LLM backbone parameterizes an MTPP through autoregressive token prediction, with a formal link from token-level cross-entropy to the MTPP log-likelihood (§\ref{sec:problem}).
     \item Three tokenization variants, visit, modality, and atomic-event, that trade context length against supervision density at otherwise identical backbone, adaptation, and training objective (§\ref{sec:tokenization}).
-    \item An empirical study on two ADRD cohorts from different sources, the TADPOLE subset of ADNI~\citep{adni,marinescu2019tadpole} and the tertiary-care EHR dataset EDUCATE~\citep{arnrich2024medical}, jointly ablating tokenization granularity and an optional Hawkes regularizer on the backbone's hidden states (§\ref{sec:regularization}) at fixed backbone, adaptation, and training recipe.
+    \item An empirical study on two ADRD cohorts from different sources, the TADPOLE subset of ADNI~\citep{adni,marinescu2019tadpole} and the tertiary-care EHR dataset EDUCATE~\citep{arnrich2024medical}, jointly ablating tokenization granularity and a suite of auxiliary-head objectives (Hawkes NLL, Cox partial likelihood, ordinal regression) on the backbone's hidden states (§\ref{sec:regularization}) at fixed backbone, adaptation, and training recipe.
     The present paper reports diagnosis prediction on TADPOLE; the remaining TADPOLE tasks and the EDUCATE cohort are laid out to set the scope of the formulation and are left for future work (§\ref{sec:experiments}).
 \end{itemize}
 
@@ -166,7 +166,7 @@ Marked temporal point processes have long been the standard tool for irregular e
 More recently, several works have tied TPPs to language-model backbones.
 LanguageTPP~\cite{kong2025language} and TPP-LLM~\cite{liu2025tpp} cast next-event prediction as next-token prediction over a serialized event stream, using an LLM either to emit event distributions directly or to feed an intensity head on top of its hidden states.
 MM-TPP~\cite{li2026longrange} extends this line to multi-modal marks, and OpenFIM~\cite{berghaus2026incontext} proposes a foundation intensity model trained on a broad mixture of heterogeneous event streams.
-Our work sits in the LLM-coupled family but is distinguished by (i) a controlled ablation over \emph{tokenization granularity} at fixed backbone, adaptation, and training objective, and (ii) treatment of the intensity head as an optional representation regularizer (§\ref{sec:regularization}) rather than the primary output, so that the same model answers both discrete and time-valued tasks by next-token prediction.
+Our work sits in the LLM-coupled family but is distinguished by (i) a controlled ablation over \emph{tokenization granularity} at fixed backbone, adaptation, and training objective, and (ii) treatment of auxiliary heads (intensity, hazard, ordinal) as optional representation regularizers (§\ref{sec:regularization}) rather than primary outputs, so that the same model answers both discrete and time-valued tasks by next-token prediction.
 
 \subsection{LLM Fine-Tuning on EHR Pseudo-Notes}
 
@@ -180,7 +180,7 @@ We keep events as explicitly delimited, modality-typed token strings with dedica
 Independent of LLMs, several works tokenize clinical events into a purpose-built vocabulary and train a transformer from scratch on the resulting stream.
 ETHOS~\cite{renc2024zero} encodes patient timelines into a discrete ``health language'' and trains a generative transformer for outcome prediction at arbitrary horizons; ARES~\cite{renc2025foundation} extends this generative-EHR line and is evaluated on similar prediction tasks.
 These models share our autoregressive view of a patient record but forgo the linguistic priors of a pretrained LLM and re-learn tokenization, model, and task heads together.
-Our variants retain the pretrained LLM via 4-bit quantization and LoRA adapters, so the only trainable structure specific to EHR is the vocabulary extension and the (optional) intensity head.
+Our variants retain the pretrained LLM via 4-bit quantization and LoRA adapters, so the only trainable structure specific to EHR is the vocabulary extension and the (optional) auxiliary heads.
 
 \section{Method}
 \label{sec:method}
@@ -188,7 +188,7 @@ Our variants retain the pretrained LLM via 4-bit quantization and LoRA adapters,
 We treat each patient's longitudinal record as a realization of a generative, marked temporal point process (MTPP) and learn it by autoregressive token prediction with a language-model backbone.
 Section~\ref{sec:problem} develops the general formulation and prediction tasks.
 Section~\ref{sec:tokenization} describes three concrete ways to implement this formulation as token sequences, and Sections~\ref{sec:model}--\ref{sec:training} specify the shared backbone and two-stage training recipe used for all three.
-Section~\ref{sec:regularization} introduces an optional intensity-based regularizer on the backbone's representation.
+Section~\ref{sec:regularization} introduces the optional auxiliary heads (Hawkes, Cox, ordinal) attached to the backbone's representation.
 Datasets, feature schema, and experimental protocol are described in Section~\ref{sec:experiments}.
 
 \subsection{Problem Formulation}
@@ -243,7 +243,7 @@ All variants share a structural template for each patient:
     \eos,
     \label{eq:template}
 \end{equation}
-and differ only in how the event payload $E(\mathbf{x}_k)$ is decomposed.
+and differ in how the event payload $E(\mathbf{x}_k)$ is decomposed and, as a secondary consequence, in which continuous covariates can cleanly enter an event (the modality-level and atomic-event encodings restrict events to measurements with a natural modality/feature tag, so quantities such as age and raw intracranial volume are dropped in those two variants).
 The three variants trade off context length against the density of supervision (fraction of tokens under a cross-entropy loss whose prefix varies across visits).
 Let $F$ denote the number of observed feature dimensions at visit $k$ and $G$ the number of modality groups: for TADPOLE, $G$ covers imaging, cognitive, and diagnosis; for EDUCATE, $G$ covers diagnosis, lab, medication, and procedure.
 Figure~\ref{fig:granularity} shows the same two-visit history under each variant.
@@ -259,42 +259,45 @@ Figure~\ref{fig:granularity} shows the same two-visit history under each variant
 1 event / visit & $G$ events / visit & $F$ events / visit \\
 \midrule
 \ttfamily
-\bos\ age=72,sex=F\newline
+\bos\ sex=F,educ=16,apoe4=0\newline
 \soe\ \ttoken{t=0m}\newline
-Hipp=7000\textbar Vent=42000\textbar\newline
-DX=CN\ \eoe\newline
+age=72\textbar vent=0.023\textbar hipp=0.004\textbar\newline
+wb=0.78\textbar icv\_ml=1500\textbar\newline
+dx=CN\ \eoe\newline
 \soe\ \ttoken{t=12m}\newline
-Hipp=6500\textbar Vent=48000\textbar\newline
-MMSE=27\textbar ADAS=15\textbar\newline
-DX=MCI\ \eoe\newline
+age=73\textbar vent=0.024\textbar hipp=0.004\textbar\newline
+wb=0.77\textbar icv\_ml=1500\textbar\newline
+mmse=27\textbar adas13=15\textbar dx=MCI\ \eoe\newline
 \ttoken{TASK\_DX}\ \ttoken{h=12m}\newline
 \rmfamily\textit{\scriptsize\,-- target --}\newline
 \ttfamily AD
 &
 \ttfamily
-\bos\ age=72,sex=F\newline
-\soe\ \ttoken{t=0m}\ \ttoken{IMG}\newline
-Hipp=7000\textbar Vent=42000\ \eoe\newline
-\soe\ \ttoken{t=0m}\ \ttoken{DX}\ CN\ \eoe\newline
-\soe\ \ttoken{t=12m}\ \ttoken{IMG}\newline
-Hipp=6500\textbar Vent=48000\ \eoe\newline
-\soe\ \ttoken{t=12m}\ \ttoken{COG}\newline
-MMSE=27\textbar ADAS=15\ \eoe\newline
-\soe\ \ttoken{t=12m}\ \ttoken{DX}\ MCI\ \eoe\newline
+\bos\ sex=F,educ=16,apoe4=0\newline
+\soe\ \ttoken{t=0m}\ \ttoken{imaging}\newline
+vent=0.023\textbar hipp=0.004\textbar wb=0.78\ \eoe\newline
+\soe\ \ttoken{t=0m}\ \ttoken{diagnosis}\ CN\ \eoe\newline
+\soe\ \ttoken{t=12m}\ \ttoken{imaging}\newline
+vent=0.024\textbar hipp=0.004\textbar wb=0.77\ \eoe\newline
+\soe\ \ttoken{t=12m}\ \ttoken{cognitive}\newline
+mmse=27\textbar adas13=15\ \eoe\newline
+\soe\ \ttoken{t=12m}\ \ttoken{diagnosis}\ MCI\ \eoe\newline
 \ttoken{TASK\_DX}\ \ttoken{h=12m}\newline
 \rmfamily\textit{\scriptsize\,-- target --}\newline
 \ttfamily AD
 &
 \ttfamily
-\bos\ age=72,sex=F\newline
-\soe\ \ttoken{t=0m}\ \ttoken{Hipp}\ 7000\ \eoe\newline
-\soe\ \ttoken{t=0m}\ \ttoken{Vent}\ 42000\ \eoe\newline
-\soe\ \ttoken{t=0m}\ \ttoken{DX}\ CN\ \eoe\newline
-\soe\ \ttoken{t=12m}\ \ttoken{Hipp}\ 6500\ \eoe\newline
-\soe\ \ttoken{t=12m}\ \ttoken{Vent}\ 48000\ \eoe\newline
-\soe\ \ttoken{t=12m}\ \ttoken{MMSE}\ 27\ \eoe\newline
-\soe\ \ttoken{t=12m}\ \ttoken{ADAS}\ 15\ \eoe\newline
-\soe\ \ttoken{t=12m}\ \ttoken{DX}\ MCI\ \eoe\newline
+\bos\ sex=F,educ=16,apoe4=0\newline
+\soe\ \ttoken{t=0m}\ \ttoken{vent}\ 0.023\ \eoe\newline
+\soe\ \ttoken{t=0m}\ \ttoken{hipp}\ 0.004\ \eoe\newline
+\soe\ \ttoken{t=0m}\ \ttoken{wb}\ 0.78\ \eoe\newline
+\soe\ \ttoken{t=0m}\ \ttoken{dx}\ CN\ \eoe\newline
+\soe\ \ttoken{t=12m}\ \ttoken{vent}\ 0.024\ \eoe\newline
+\soe\ \ttoken{t=12m}\ \ttoken{hipp}\ 0.004\ \eoe\newline
+\soe\ \ttoken{t=12m}\ \ttoken{wb}\ 0.77\ \eoe\newline
+\soe\ \ttoken{t=12m}\ \ttoken{mmse}\ 27\ \eoe\newline
+\soe\ \ttoken{t=12m}\ \ttoken{adas13}\ 15\ \eoe\newline
+\soe\ \ttoken{t=12m}\ \ttoken{dx}\ MCI\ \eoe\newline
 \ttoken{TASK\_DX}\ \ttoken{h=12m}\newline
 \rmfamily\textit{\scriptsize\,-- target --}\newline
 \ttfamily AD
@@ -305,7 +308,7 @@ MMSE=27\textbar ADAS=15\ \eoe\newline
 \multicolumn{1}{l@{}}{\textit{densest supervision}} \\
 \bottomrule
 \end{tabular}
-\caption{Two-visit patient history under the three granularities. Visit~1 at $t{=}0$ has no cognitive scores; modality-level (M) drops the \ttoken{COG} sub-event, while (V) and (A) drop the missing features in place. All three share the template of Eq.~\eqref{eq:template} and differ only in how $E(\mathbf{x}_k)$ is decomposed. The trailing task prompt \ttoken{TASK\_DX}\,\ttoken{h=12m} and the target response (here \texttt{AD}) are used only in Stage~2 supervised fine-tuning (\S\ref{sec:training}), where the cross-entropy loss is restricted to the response tokens; Stage~1 continued pretraining uses only the history portion, ending at the final \eoe\ of the last observed visit.}
+\caption{Two-visit patient history under the three granularities, with static context (sex, education, APOE-$\varepsilon$4) emitted once and MRI volumes reported as ratios to intracranial volume. Visit~1 at $t{=}0$ has no cognitive scores; modality-level (M) drops the \ttoken{cognitive} sub-event, while (V) and (A) drop the missing features in place. The (V) encoding additionally emits current age and ICV (in mL) per visit; these are omitted by the modality-grouped (M) and atomic (A) encodings, which restrict events to measurements with a natural modality/feature tag. All three share the template of Eq.~\eqref{eq:template} and differ in how $E(\mathbf{x}_k)$ is decomposed and which fields it covers. The trailing task prompt \ttoken{TASK\_DX}\,\ttoken{h=12m} and the target response (here \texttt{AD}) are used only in Stage~2 supervised fine-tuning (\S\ref{sec:training}), where the cross-entropy loss is restricted to the response tokens; Stage~1 continued pretraining uses only the history portion, ending at the final \eoe\ of the last observed visit.}
 \label{fig:granularity}
 \end{figure}
 
@@ -331,7 +334,7 @@ Task prompts are appended after the history as $\ttoken{TASK\_*} \, \ttoken{hori
 \label{sec:model}
 
 We use a causal language model $f_\theta$ as the backbone.
-Unless stated otherwise, $f_\theta$ is Qwen3.5 (0.8\,B and 2\,B variants studied), loaded in 4-bit NF4 quantization.
+Unless stated otherwise, $f_\theta$ is Qwen3.5-0.8B, loaded in 4-bit NF4 quantization; scale-up to Qwen3.5-2B is reserved for follow-up and reported only when stated.
 For variants that introduce new tokens (category labels, modality tags, horizon bins), we extend the tokenizer and resize the embedding and output-projection matrices; new rows are initialized to the mean of the pretrained rows.
 
 Trainable parameters are restricted to (i)~Low-Rank Adaptation \cite{hu2022lora} inserted in the attention and MLP projections ($\texttt{q,k,v,o\_proj}$, $\texttt{gate,up,down\_proj}$) as $W = W_0 + (\alpha/r)\, B A$ with $r=16$, $\alpha=64$, dropout $0.1$, and (ii)~the new token rows and the language-model head.
@@ -361,28 +364,56 @@ The loss is computed only on the response tokens:
     \label{eq:loss_s2}
 \end{equation}
 We study two regimes: \emph{next-visit} ($R$ targets only the immediate next observation) and \emph{horizon-conditioned} ($R$ targets any future observation whose offset matches the horizon token in $P$, so one model answers arbitrary horizons).
-Hyperparameters (learning rate $10^{-4}$ in both stages, effective batch size $16$, 5--9 epochs) are listed in Appendix.
+Both stages use learning rate $10^{-4}$ and per-device batch size $4$ on a single A100 80\,GB; Stage~1 runs for 7 (no augmentation) or 9 (augmentation) epochs, Stage~2 for 4 or 5 epochs respectively.
+Augmentation, when enabled, applies 10\% modality dropout, 2\% feature-value noise, and 15\% history dropout to the training sequences.
+Remaining hyperparameters are in Appendix.
 
-\subsection{Regularizing the Representation}
+\subsection{Auxiliary-Head Objectives}
 \label{sec:regularization}
 
-The token-level objective of Eqs.~\eqref{eq:loss_s1}--\eqref{eq:loss_s2} treats inter-event time only through its surface form: the tokens of $T(\tau_k)$ appear in the loss exactly as any other symbol, and nothing in the objective encourages the backbone's hidden states to encode time continuously.
-As an \emph{optional} regularizer on the learned representation, we attach small per-mark projections $(\mu_m, \alpha_m, \beta_m) = \mathrm{softplus}\bigl(W_{\{\mu,\alpha,\beta\},m}\, h_k\bigr)$ from the backbone's last hidden state $h_k$ at event positions, and define a piecewise Hawkes intensity
+The token-level objective of Eqs.~\eqref{eq:loss_s1}--\eqref{eq:loss_s2} treats inter-event time only through its surface form: the tokens of $T(\tau_k)$ appear in the loss exactly as any other symbol, and nothing in the objective forces the backbone's hidden states to encode time continuously or to respect the ordinal structure of diagnosis.
+To probe which, if any, of these inductive biases help, we attach one \emph{optional} auxiliary head on the backbone representation during Stage~2.
+All heads share the combined objective
+\begin{equation}
+    \mathcal{L} \;=\; \mathcal{L}_{\text{S2}} + \gamma\, \mathcal{L}_{\text{aux}},
+    \label{eq:combined}
+\end{equation}
+with $\gamma$ linearly warmed from $0$ to $0.1$ over one epoch so that the text objective is established before the auxiliary head contributes gradients.
+Auxiliary heads are trained jointly with the text head but are \emph{not} used for generation; they shape the hidden states only through back-propagation.
+Ablations compare each tokenization variant across these heads, including a pure-text baseline ($\gamma=0$), at otherwise matched configurations.
+
+\paragraph{Hawkes intensity head.}
+Attached on top of a tokenizer variant that additionally prepends summary temporal features (inter-event statistics) to the prompt.
+Small per-mark projections $(\mu_m, \alpha_m, \beta_m) = \mathrm{softplus}\bigl(W_{\{\mu,\alpha,\beta\},m}\, h_k\bigr)$ from the backbone's last hidden state $h_k$ at event positions parameterize a piecewise Hawkes intensity in the classical exponential-kernel form~\citep{hawkes1971spectra,shchur2021neural},
 \begin{equation}
     \lambda_m(t \mid \Hcal_k)
-    \;=\; \mu_m + \!\!\sum_{j:\, t_j < t,\; m_j = m}\!\! (\alpha_m - \mu_m)\, e^{-\beta_m (t - t_j)}.
+    \;=\; \mu_m + \!\!\sum_{j:\, t_j < t,\; m_j = m}\!\! (\alpha_m - \mu_m)\, e^{-\beta_m (t - t_j)},
     \label{eq:hawkes}
 \end{equation}
-Stage~2 then minimizes $\mathcal{L} = \mathcal{L}_{\text{S2}} + \gamma\,\mathcal{L}_{\text{NLL}}$ with the standard MTPP negative log-likelihood
+and $\mathcal{L}_{\text{aux}} = \mathcal{L}_{\text{NLL}}$ is the MTPP negative log-likelihood
 \begin{equation}
     \mathcal{L}_{\text{NLL}}
     \;=\; \int_0^{T} \sum_m \lambda_m(s)\, ds \;-\; \sum_{k=1}^{K} \log \lambda_{m_k}(t_k),
     \label{eq:nll}
 \end{equation}
-computed by trapezoidal quadrature on the per-event intensities of Eq.~\eqref{eq:hawkes}.
-$\gamma$ is linearly warmed from $0$ to $0.1$ over one epoch so that the text objective is established before the intensity head contributes gradients.
-The intensity head is a regularizer only: it shapes the hidden states via back-propagation but is \emph{not} used for generation in this paper.
-Ablations compare each tokenization variant with and without this term at otherwise matched configurations.
+computed in closed form: the compensator decomposes into a baseline term $T\sum_m \mu_m$ and a sum of per-event excitation integrals $\frac{\alpha_m - \mu_m}{\beta_m}\bigl(1 - e^{-\beta_m (T - t_j)}\bigr)$~\citep{ogata1981lewis}.
+The implementation follows the \texttt{PiecewiseHawkesIntensity} interface of OpenFIM~\citep{berghaus2026incontext} but does not share code with it.
+
+\paragraph{Cox proportional-hazards head.}
+A log-hazard scalar $f(h_k)$ read from the last hidden state at each event position is trained under the Cox partial log-likelihood~\citep{cox1972regression},
+\begin{equation}
+    \mathcal{L}_{\text{Cox}}
+    \;=\; -\!\!\sum_{i:\, \delta_i=1}\!
+          \Bigl[\, f(h_{k_i}) \;-\; \log \!\!\!\sum_{j \in \mathcal{R}(t_i)}\!\!\! \exp\!\bigl(f(h_{k_j})\bigr) \,\Bigr],
+    \label{eq:coxph}
+\end{equation}
+where $\delta_i=1$ marks an observed class transition and $\mathcal{R}(t_i)$ is the risk set at time $t_i$.
+Within-batch ties are handled by the Breslow approximation~\citep{breslow1972contribution}.
+Two sub-variants are considered: an accumulated-risk-set form that buffers negatives across mini-batches~\citep{katzman2018deepsurv,kvamme2019time}, and an attention-pooled form in which $f$ reads an attention-weighted average over the history's hidden states rather than the last one, using the self-attentive pooling of~\citet{lin2017structured}.
+
+\paragraph{Ordinal head.}
+Diagnosis labels admit a natural order CN\,$<$\,MCI\,$<$\,AD, so we additionally consider a two-logit ordinal head that minimizes cumulative binary cross-entropy on the thresholded predictions $P(d > \text{CN} \mid h_k)$ and $P(d > \text{MCI} \mid h_k)$, following the cumulative-link ordinal formulation of~\citet{frank2001simple} and its deep-network version~\citep{niu2016ordinal}.
+This head carries no timing information; it tests whether an order-aware classification signal, independent of point-process structure, suffices to shape the hidden states.
 
 \section{Experiments}
 \label{sec:experiments}
@@ -396,10 +427,19 @@ Prediction tasks are defined per dataset, as the two sources differ in the targe
 \paragraph{TADPOLE (ADNI).}
 The TADPOLE challenge subset of ADNI \cite{adni,marinescu2019tadpole} provides $\sim$1{,}700 patients in the training split (D1), each with at least two visits, and a held-out rollover split (D2).
 Three static covariates $\mathbf{c}$ (sex, years of education, APOE-$\varepsilon$4 allele count) are emitted once per patient.
-Each visit event then carries up to eleven fields: time since baseline $t$ (months), inter-visit interval $\Delta t$, current age, diagnosis $d \in \{\text{CN},\text{MCI},\text{AD}\}$, three cognitive scores (MMSE, CDRSB, ADAS-13), and four MRI summaries from the ADNI FreeSurfer pipeline (ventricles, hippocampus, and whole-brain volumes normalized as ratios to intracranial volume (ICV), plus ICV itself in milliliters).
+Nine observation fields are available per visit: current age, diagnosis $d \in \{\text{CN}, \text{MCI}, \text{AD}\}$, three cognitive scores (MMSE, CDRSB, ADAS-13), three MRI volumes normalized as ratios to intracranial volume (ventricles, hippocampus, whole-brain), and ICV itself in milliliters.
+The (V) encoding emits all nine; the (M) and (A) encodings drop age and ICV-in-mL (they have no clean modality/feature tag) and emit the remaining seven grouped by modality or atomized by feature.
+Time since baseline $t$ (months) and inter-visit interval $\Delta t$ are attached as tokens at each event position.
 Preprocessing is light: raw MRI volumes are read from the ADNI FreeSurfer release, the three normalized volumes are computed as ratios to ICV, ICV is converted from mm$^3$ to mL, ADNI transition labels (e.g., \texttt{NL to MCI}, \texttt{MCI to Dementia}) are collapsed to the 3-way CN/MCI/AD taxonomy, and patients with fewer than two visits are dropped.
 Given a history $\Hcal_k$ and horizon $h>0$, we define five prediction tasks on TADPOLE: diagnosis at $h$ (3-way CN/MCI/AD), ADAS-Cog at $h$, ventricle-to-ICV ratio at $h$, inter-visit interval $\tau_{k+1}$, and multi-step trajectory generation by ancestral sampling.
 Experiments in this paper report diagnosis; the remaining four are reserved for future work.
+We also consider a \emph{DX-hidden} ablation in which the diagnosis field is dropped from each visit event at training and inference, to measure how much of the TADPOLE signal passes through the cognitive and MRI fields alone.
+
+\paragraph{Evaluation protocol.}
+TADPOLE diagnosis is evaluated with 5-fold stratified group $k$-fold cross-validation on D1 (groups = patient IDs, seed~42), so that no patient appears in both train and validation.
+Each fold runs the full two-stage recipe (§\ref{sec:training}) and scores the held-out patients by balanced class accuracy (BCA) over the three classes \{CN, MCI, AD\}; BCA is used as the primary metric because ADNI is strongly class-imbalanced and random-chance accuracy would otherwise dominate a plain accuracy score.
+The D2 rollover split is held out as a secondary, temporally shifted test set.
+Across tokenization, prompt style, DX-hidden, auxiliary head, next-visit vs.\ horizon regime, and augmentation on/off, the Stage-2 sweep reaches 192 training runs per fold (48 mode-loss pairs $\times$ 2 augmentation settings $\times$ 2 regimes).
 
 \paragraph{EDUCATE.}
 EDUCATE is a tertiary-care electronic health record dataset covering dementia and related disorders, harmonized to OMOP concepts and MEDS events \cite{arnrich2024medical}.
@@ -414,21 +454,24 @@ The same prompt template is reused across horizons so that a single trained mode
 \subsection{Results}
 \label{sec:results}
 
-We study how the tokenization granularity of §\ref{sec:tokenization} and the optional intensity regularizer of §\ref{sec:regularization} affect TADPOLE diagnosis prediction.
-All three variants (V, M, A) share the same backbone, adapter, and two-stage training recipe, so any gap in accuracy traces to how the event payload is encoded.
-We then run each variant with and without the auxiliary Hawkes intensity head of Eq.~\eqref{eq:hawkes} at otherwise matched settings, to check whether shaping the backbone's hidden states through a continuous-time intensity loss helps next-token diagnosis prediction.
+We study how the tokenization granularity of §\ref{sec:tokenization} and the auxiliary-head choices of §\ref{sec:regularization} affect TADPOLE diagnosis prediction.
+All three encodings (V, M, A) share the same backbone, adapter, and two-stage training recipe, so any gap in BCA traces to how the event payload is encoded.
+We then run each encoding under each of the auxiliary heads (pure text, Hawkes NLL, Cox partial likelihood with accumulated-risk-set and attention-pooled sub-variants, and ordinal cumulative BCE), at otherwise matched settings, to test which inductive bias on the hidden states transfers to next-token diagnosis accuracy.
 
 \paragraph{Headline results on ADNI TADPOLE.}
-[Placeholder: best configuration across tokenization variants and the Hawkes head on 3-way CN/MCI/AD diagnosis at horizon $h$, scored on the D2 rollover split.]
+[Placeholder: best configuration across tokenization variants and auxiliary heads on 3-way CN/MCI/AD diagnosis, reported as mean $\pm$ std BCA over 5 folds of D1 and on the D2 rollover split.]
 
 \paragraph{Headline results on EDUCATE.}
-[Placeholder: best configuration across tokenization variants and the Hawkes head on binary healthy/non-healthy classification and on 5-way AD/MCI/FTD/DLB/other classification, under the leak-safe preprocess.]
+[Placeholder: best configuration across tokenization variants and auxiliary heads on binary healthy/non-healthy classification and on 5-way AD/MCI/FTD/DLB/other classification, under the leak-safe preprocess.]
 
 \paragraph{Tokenization granularity.}
-[Placeholder: diagnosis accuracy for variants V, M, and A on the D2 rollover split at matched backbone, adapter, and training recipe.]
+[Placeholder: BCA for encodings V, M, and A at matched backbone, adapter, and training recipe, averaged over folds.]
 
-\paragraph{Intensity-head variants.}
-[Placeholder: each tokenization variant with and without the auxiliary Hawkes head at $\gamma=0.1$, under the same splits and horizons.]
+\paragraph{Auxiliary-head ablation.}
+[Placeholder: each encoding under pure text ($\gamma=0$), Hawkes NLL, Cox partial likelihood (plain / accumulated / attention-pooled), and ordinal cumulative BCE, all at $\gamma=0.1$, under the same splits and horizons.]
+
+\paragraph{DX-hidden and augmentation ablations.}
+[Placeholder: BCA for the best encoding under the DX-hidden preprocess and under the \emph{moderate} augmentation setting (Section~\ref{sec:training}), reported alongside the default DX-visible, no-augmentation configuration.]
 
 \section{Conclusion}
 
@@ -444,6 +487,75 @@ We then run each variant with and without the auxiliary Hawkes intensity head of
 
 \appendix
 
+\section{Auxiliary Heads}
+\label{app:aux_heads}
+
+This appendix gives the formal definition of each auxiliary head of §\ref{sec:regularization}, matched to the \texttt{brainx} implementation.
+Notation: $h_k \in \mathbb{R}^d$ is the backbone's last hidden state at event position $k$; $t_k$ and $m_k$ are the event time and mark; $d_k \in \{0,1,2\}$ encodes diagnosis (CN, MCI, AD); $\sigma(\cdot)$ is the logistic function; $\mathcal{B}$ is a mini-batch of valid event positions.
+The pure-text baseline sets $\mathcal{L}_{\text{aux}} = 0$ in Eq.~\eqref{eq:combined}, so Stage~2 optimizes only the response-token cross-entropy $\mathcal{L}_{\text{S2}}$ of Eq.~\eqref{eq:loss_s2}; the subsections below cover the five heads that specify a non-trivial $\mathcal{L}_{\text{aux}}$.
+
+\subsection{Hawkes NLL (closed form)}
+Small per-mark projections produce $(\mu_m^{(k)}, \alpha_m^{(k)}, \beta_m^{(k)}) = \mathrm{softplus}\bigl(W_{\{\mu,\alpha,\beta\},m}\, h_k\bigr)$ at every event position $k$.
+With the piecewise exponential intensity of Eq.~\eqref{eq:hawkes}, the compensator admits the closed form
+\begin{equation}
+    \int_0^T \lambda_m(s)\, ds
+    \;=\; \mu_m^{(K)}\, T
+    \;+\; \!\!\sum_{j:\, m_j = m}\!\!
+          \frac{\alpha_m^{(j)} - \mu_m^{(j)}}{\beta_m^{(j)}}
+          \Bigl(1 - e^{-\beta_m^{(j)}(T - t_j)}\Bigr),
+    \label{eq:hawkes_compensator}
+\end{equation}
+where $\mu_m^{(K)}$ is the baseline read off the last event.
+Summing over marks and subtracting the log-intensity at events yields $\mathcal{L}_{\text{NLL}}$ of Eq.~\eqref{eq:nll}~\citep{hawkes1971spectra,ogata1981lewis}.
+
+\subsection{Cox partial log-likelihood}
+A scalar log-hazard $f(h_k) = w^\top h_k + b$ is read off the last hidden state at each event position, with $w \in \mathbb{R}^d$ and $b \in \mathbb{R}$.
+Events marking an observed class transition are labeled $\delta_k = 1$, otherwise $\delta_k = 0$.
+With times sorted descending and within-batch ties resolved by the Breslow approximation~\citep{breslow1972contribution,cox1972regression},
+\begin{equation}
+    \mathcal{L}_{\text{Cox}}
+    \;=\; -\frac{1}{N_\delta}\!\! \sum_{k:\, \delta_k = 1}\!\!
+    \Bigl[\, f(h_k)
+    \;-\; \log \!\!\!\sum_{j \in \mathcal{R}(t_k)}\!\!\! \exp\!\bigl(f(h_j)\bigr) \,\Bigr],
+    \qquad N_\delta = |\{k: \delta_k = 1\}|,
+    \label{eq:cox_app}
+\end{equation}
+where the risk set $\mathcal{R}(t_k) = \{j : t_j \geq t_k\}$ is evaluated via a descending-time cumulative log-sum-exp.
+
+\subsection{Cox with accumulated risk set}
+At small per-batch sizes the ranking signal in Eq.~\eqref{eq:cox_app} weakens.
+Following~\citep{katzman2018deepsurv,kvamme2019time}, we buffer $\{f(h_k), t_k, \delta_k\}$ across $N_{\text{acc}} = 4$ consecutive micro-batches and compute Eq.~\eqref{eq:cox_app} on the combined buffer, yielding an effective risk set of $|\mathcal{B}| \cdot N_{\text{acc}}$.
+Gradients flow only through the most recent micro-batch; earlier entries are detached and provide ranking context.
+On non-flush steps, only the text loss is applied.
+
+\subsection{Cox with attention-pooled hidden state}
+A learned query $q \in \mathbb{R}^d$ attends over the full history $\{h_1, \ldots, h_K\}$ via scaled dot-product attention,
+\begin{equation}
+    \alpha_k
+    \;=\; \frac{\exp\bigl(\langle q, h_k \rangle / \sqrt{d}\bigr)}
+               {\sum_j \exp\bigl(\langle q, h_j \rangle / \sqrt{d}\bigr)},
+    \qquad
+    \bar h
+    \;=\; \sum_k \alpha_k\, h_k,
+    \label{eq:attn_pool}
+\end{equation}
+after which the log-hazard is $f(\bar h) = w^\top \bar h + b$, following the self-attentive pooling of~\citet{lin2017structured}.
+Eq.~\eqref{eq:cox_app} is then applied on the attention-pooled log-hazards.
+
+\subsection{Ordinal cumulative BCE}
+A two-logit head $g: h_k \mapsto (z_{k,1}, z_{k,2}) \in \mathbb{R}^2$ parameterizes cumulative probabilities
+$P(d_k \geq 1 \mid h_k) = \sigma(z_{k,1})$ and $P(d_k \geq 2 \mid h_k) = \sigma(z_{k,2})$
+under the cumulative-link ordinal formulation~\citep{frank2001simple,niu2016ordinal}:
+\begin{equation}
+    \mathcal{L}_{\text{ord}}
+    \;=\; \frac{1}{2|\mathcal{B}|} \sum_{k \in \mathcal{B}}\!
+    \Bigl[\,
+      \mathrm{BCE}\!\bigl(z_{k,1},\, \mathbb{1}[d_k \geq 1]\bigr)
+    + \mathrm{BCE}\!\bigl(z_{k,2},\, \mathbb{1}[d_k \geq 2]\bigr)
+    \,\Bigr].
+    \label{eq:ord}
+\end{equation}
+Posterior class probabilities used at decoding time are recovered as $P(\text{CN}) = 1 - \sigma(z_1)$, $P(\text{MCI}) = \sigma(z_1) - \sigma(z_2)$, $P(\text{AD}) = \sigma(z_2)$.
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
