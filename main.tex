@@ -138,7 +138,6 @@ Much of the machine-learning work in this area still uses a cross-sectional setu
 This setup does not make full use of the relationships between observations collected over time, and it does not naturally adapt to a patient's disease stage.
 Two recent lines of work offer partial answers.
 Marked temporal point processes (MTPPs), including neural and LLM-coupled variants, give generative models for irregularly timed event data~\citep{kong2025language,liu2025tpp,li2026longrange,berghaus2026incontext}.
-
 Separately, autoregressive transformers trained on tokenized electronic health records support arbitrary-horizon forecasting from a shared sequence backbone~\citep{renc2024zero,renc2025foundation}.
 To our knowledge, these two lines have not been joined into a single generative framework for multimodal ADRD trajectories.
 
@@ -234,7 +233,7 @@ An autoregressive language model factorizes $s_{1:L}$ by the chain rule, which w
 \end{equation}
 Because $\phi$ is injective on its image, each event-block factor $p_\theta\!\bigl(s^{(k)} \mid s^{(c)}, s^{(<k)}\bigr)$ is a parametric surrogate for the MTPP conditional $p^*(\tau_k, \mathbf{x}_k \mid \Hcal_{k-1})$, with continuous marks resolved to the tokenizer's numeric precision.
 Token-level cross-entropy on $s_{1:L}$ therefore minimizes a discretized negative log-likelihood of Eq.~\eqref{eq:mtpp_joint}~\citep{liu2025tpp,kong2025language}.
-This reformulation (i)~reuses a pretrained language-model backbone in place of a bespoke intensity network, (ii)~handles heterogeneous marks---categorical, ordinal, and continuous---under a single objective, and (iii)~unifies classification, regression, and forecasting as conditional next-token prediction.
+This reformulation (i)~reuses a pretrained language-model backbone in place of a bespoke intensity network, (ii)~handles heterogeneous marks (categorical, ordinal, and continuous) under a single objective, and (iii)~unifies classification, regression, and forecasting as conditional next-token prediction.
 
 \subsection{Three Granularity Variants}
 \label{sec:tokenization}
