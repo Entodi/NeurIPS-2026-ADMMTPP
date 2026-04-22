@@ -150,7 +150,7 @@ Within this framework we compare three tokenization granularities, visit-level, 
 \begin{itemize}[leftmargin=*,itemsep=2pt,topsep=2pt]
     \item A generative representation learning framework for longitudinal clinical records in which a pretrained LLM backbone parameterizes an MTPP through autoregressive token prediction, with a formal link from token-level cross-entropy to the MTPP log-likelihood (§\ref{sec:problem}).
     \item Three tokenization variants, visit, modality, and atomic-event, that trade context length against supervision density at otherwise identical backbone, adaptation, and training objective (§\ref{sec:tokenization}).
-    \item An empirical study on two ADRD cohorts from different sources, the TADPOLE subset of ADNI~\citep{adni,marinescu2018tadpole} and the tertiary-care EHR dataset EDUCATE~\citep{arnrich2024meds}, jointly ablating tokenization granularity and an optional Hawkes regularizer on the backbone's hidden states (§\ref{sec:regularization}) at fixed backbone, adaptation, and training recipe.
+    \item An empirical study on two ADRD cohorts from different sources, the TADPOLE subset of ADNI~\citep{adni,marinescu2019tadpole} and the tertiary-care EHR dataset EDUCATE~\citep{arnrich2024meds}, jointly ablating tokenization granularity and an optional Hawkes regularizer on the backbone's hidden states (§\ref{sec:regularization}) at fixed backbone, adaptation, and training recipe.
     The present paper reports diagnosis prediction on TADPOLE; the remaining TADPOLE tasks and the EDUCATE cohort are laid out to set the scope of the formulation and are left for future work (§\ref{sec:experiments}).
 \end{itemize}
 
@@ -195,7 +195,7 @@ Datasets, feature schema, and experimental protocol are described in Section~\re
 \label{sec:problem}
 
 Let $\mathcal{S} = \{(t_k, \mathbf{x}_k)\}_{k=1}^{K}$ denote a patient record with $K$ observations, where $t_k \in \mathbb{R}_{\geq 0}$ is the time since baseline (months) and $\mathbf{x}_k$ is a heterogeneous, possibly partially observed mark comprising diagnostic labels, cognitive scores, neuroimaging summaries, and structured codes.
-Time-invariant covariates (sex, education, APOE-$\varepsilon$4 genotype, baseline age) are collected in a context vector $\mathbf{c}$.
+Time-invariant covariates (sex, years of education, APOE-$\varepsilon$4 allele count) are collected in a context vector $\mathbf{c}$; age is treated as a per-visit feature.
 We write $\Hcal_k = \{(\mathbf{c}, (t_1, \mathbf{x}_1), \ldots, (t_k, \mathbf{x}_k))\}$ for the history up to and including the $k$-th observation and $\tau_k = t_k - t_{k-1}$ for the inter-observation interval.
 
 A marked temporal point process is characterized by the conditional density of the next event given the history~\citep{daley2003introduction,shchur2021neural},
@@ -245,7 +245,7 @@ All variants share a structural template for each patient:
 \end{equation}
 and differ only in how the event payload $E(\mathbf{x}_k)$ is decomposed.
 The three variants trade off context length against the density of supervision (fraction of tokens under a cross-entropy loss whose prefix varies across visits).
-Let $F$ denote the number of observed feature dimensions at visit $k$ and $G$ the number of modality groups (imaging, cognitive, diagnosis, and, for EDUCATE, lab / medication / procedure).
+Let $F$ denote the number of observed feature dimensions at visit $k$ and $G$ the number of modality groups: for TADPOLE, $G$ covers imaging, cognitive, and diagnosis; for EDUCATE, $G$ covers diagnosis, lab, medication, and procedure.
 Figure~\ref{fig:granularity} shows the same two-visit history under each variant.
 
 \begin{figure}[t]
@@ -388,9 +388,10 @@ Both datasets follow the same abstract schema $(t_k, \mathbf{x}_k)$ with $\mathb
 Prediction tasks are defined per dataset, as the two sources differ in the targets available.
 
 \paragraph{TADPOLE (ADNI).}
-The TADPOLE challenge subset of ADNI \cite{adni,marinescu2018tadpole} provides $\sim$1{,}700 patients in the training split (D1) with at least two visits each and a held-out rollover split (D2).
-Each visit yields up to eleven features: diagnosis $d \in \{\text{CN},\text{MCI},\text{AD}\}$, cognitive scores (MMSE, CDRSB, ADAS-13), and four MRI summaries (ventricles, hippocampus, whole brain, intracranial volume; ventricles and hippocampus are reported as ICV ratios).
-Four static attributes ($\mathbf{c}$) are sex, years of education, APOE-$\varepsilon$4 allele count, and baseline age.
+The TADPOLE challenge subset of ADNI \cite{adni,marinescu2019tadpole} provides $\sim$1{,}700 patients in the training split (D1), each with at least two visits, and a held-out rollover split (D2).
+Three static covariates $\mathbf{c}$ (sex, years of education, APOE-$\varepsilon$4 allele count) are emitted once per patient.
+Each visit event then carries up to eleven fields: time since baseline $t$ (months), inter-visit interval $\Delta t$, current age, diagnosis $d \in \{\text{CN},\text{MCI},\text{AD}\}$, three cognitive scores (MMSE, CDRSB, ADAS-13), and four MRI summaries from the ADNI FreeSurfer pipeline -- ventricles, hippocampus, and whole-brain volumes normalized as ratios to intracranial volume (ICV), plus ICV itself in milliliters.
+Preprocessing is light: raw MRI volumes are read from the ADNI FreeSurfer release, the three normalized volumes are computed as ratios to ICV, ICV is converted from mm$^3$ to mL, ADNI transition labels (e.g., \texttt{NL to MCI}, \texttt{MCI to Dementia}) are collapsed to the 3-way CN/MCI/AD taxonomy, and patients with fewer than two visits are dropped.
 Given a history $\Hcal_k$ and horizon $h>0$, we define five prediction tasks on TADPOLE: diagnosis at $h$ (3-way CN/MCI/AD), ADAS-Cog at $h$, ventricle-to-ICV ratio at $h$, inter-visit interval $\tau_{k+1}$, and multi-step trajectory generation by ancestral sampling.
 Experiments in this paper report diagnosis; the remaining four are reserved for future work.
 
@@ -409,7 +410,7 @@ The same prompt template is reused across horizons so that a single trained mode
 
 We study how the tokenization granularity of §\ref{sec:tokenization} and the optional intensity regularizer of §\ref{sec:regularization} affect TADPOLE diagnosis prediction.
 All three variants (V, M, A) share the same backbone, adapter, and two-stage training recipe, so any gap in accuracy traces to how the event payload is encoded.
-We then run each variant with and without an auxiliary intensity head at otherwise matched settings, to check whether shaping the backbone's hidden states through a continuous-time intensity loss helps next-token diagnosis prediction; we also compare intensity parameterizations (e.g., Hawkes, Cox).
+We then run each variant with and without the auxiliary Hawkes intensity head of Eq.~\eqref{eq:hawkes} at otherwise matched settings, to check whether shaping the backbone's hidden states through a continuous-time intensity loss helps next-token diagnosis prediction.
 
 \paragraph{Headline results on ADNI TADPOLE.}
 [Placeholder: best configuration across tokenization variants and the Hawkes head on 3-way CN/MCI/AD diagnosis at horizon $h$, scored on the D2 rollover split.]
@@ -421,7 +422,7 @@ We then run each variant with and without an auxiliary intensity head at otherwi
 [Placeholder: diagnosis accuracy for variants V, M, and A on the D2 rollover split at matched backbone, adapter, and training recipe.]
 
 \paragraph{Intensity-head variants.}
-[Placeholder: each tokenization variant with and without the auxiliary intensity head at $\gamma=0.1$, and across intensity parameterizations (e.g., Hawkes, Cox), under the same splits and horizons.]
+[Placeholder: each tokenization variant with and without the auxiliary Hawkes head at $\gamma=0.1$, under the same splits and horizons.]
 
 \section{Conclusion}
 
