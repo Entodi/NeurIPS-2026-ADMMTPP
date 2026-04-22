@@ -179,7 +179,7 @@ We keep events as explicitly delimited, modality-typed token strings with dedica
 \subsection{Non-Language EHR Tokenizers}
 
 Independent of LLMs, several works tokenize clinical events into a purpose-built vocabulary and train a transformer from scratch on the resulting stream.
-ETHOS~\cite{renc2024zero} encodes patient timelines into a discrete ``health language'' and trains a generative transformer for outcome prediction at arbitrary horizons; ARES~\cite{renc2025foundation} extends this generative-EHR line and is evaluated on similar prediction tasks.
+ETHOS~\cite{renc2024zero} encodes patient timelines into a discrete ``health language'' and trains a generative transformer for outcome prediction at arbitrary horizons. ARES~\cite{renc2025foundation} extends this generative-EHR line and is evaluated on similar prediction tasks.
 These models share our autoregressive view of a patient record but forgo the linguistic priors of a pretrained LLM and re-learn tokenization, model, and task heads together.
 Our variants retain the pretrained LLM via 4-bit quantization and LoRA adapters, so the only trainable structure specific to EHR is the vocabulary extension and the (optional) auxiliary heads.
 
