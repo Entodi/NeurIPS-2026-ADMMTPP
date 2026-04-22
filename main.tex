@@ -129,24 +129,24 @@
 \section{Introduction}
 \label{sec:intro}
 
-Alzheimer's disease and related dementias (ADRD) develop over many years, and the types of measurements that are most informative change across the course of disease~\citep{self2023emerging}.
-Molecular and fluid biomarkers may be most informative in earlier stages, while structural imaging, cognitive testing, and functional assessments often become more informative later.
-ADRD is also highly heterogeneous across patients, with subtypes that differ in clinical presentation, progression pattern, and rate of decline~\citep{young2018uncovering,fereshtehnejad2015new}.
-As a result, predictive models for ADRD must address both longitudinal changes in which modalities matter most and substantial variability between patients.
+Alzheimer's disease and related dementias (ADRD) develop over many years, and the most informative measurements change with disease stage~\citep{self2023emerging}.
+Molecular and fluid biomarkers tend to be most informative in early stages, while structural imaging, cognitive testing, and functional assessments become more informative later on.
+ADRD also differs widely across patients, with subtypes that vary in clinical presentation, progression pattern, and rate of decline~\citep{young2018uncovering,fereshtehnejad2015new}.
+Predictive models therefore have to handle both shifts over time in which modalities matter most and large variability between patients.
 
-Much of the machine-learning literature in this area still uses a cross-sectional setup, in which separate models are trained for separate outcomes from a fixed historical window, for example diagnosis at 24 months or ADAS-Cog at 36 months~\citep{marinescu2019tadpole}.
-This approach does not fully use the relationships between observations collected over time and does not naturally adapt to a patient's disease stage.
-Two recent lines of work offer partial solutions.
-Marked temporal point processes (MTPPs), including neural and LLM-coupled variants, provide generative models for irregularly timed event data~\citep{kong2025language,liu2025tpp,li2026longrange,berghaus2026incontext}.
+Much of the machine-learning work in this area still uses a cross-sectional setup, in which separate models are trained for separate outcomes from a fixed historical window, for example diagnosis at 24 months or ADAS-Cog at 36 months~\citep{marinescu2019tadpole}.
+This setup does not make full use of the relationships between observations collected over time, and it does not naturally adapt to a patient's disease stage.
+Two recent lines of work offer partial answers.
+Marked temporal point processes (MTPPs), including neural and LLM-coupled variants, give generative models for irregularly timed event data~\citep{kong2025language,liu2025tpp,li2026longrange,berghaus2026incontext}.
 Separately, autoregressive transformers trained on tokenized electronic health records support arbitrary-horizon forecasting from a shared sequence backbone~\citep{renc2024zero,renc2025foundation}.
-To our knowledge, these strands have not been brought together into a unified generative framework for multimodal ADRD trajectories.
+To our knowledge, these two lines have not been joined into a single generative framework for multimodal ADRD trajectories.
 
-We introduce an autoregressive generative framework that combines a pretrained language-model backbone, point-process structure for irregular timing, and multimodal ADRD event representations within a single token-prediction objective.
+We present an autoregressive generative framework that combines a pretrained language-model backbone, point-process structure for irregular timing, and multimodal ADRD event representations under a single token-prediction objective.
 Each patient history is serialized as a modality-tagged, delimited token sequence, and a pretrained autoregressive backbone is adapted to it with parameter-efficient fine-tuning.
-Under this construction, the conditional density of the next event is represented implicitly through the next-token distribution over that event's serialized tokens, and we show that next-token cross-entropy on the resulting serialization corresponds to a discretized MTPP negative log-likelihood up to tokenizer resolution.
-A single model, trained with continued pretraining followed by supervised fine-tuning, supports diagnosis classification, biomarker regression, inter-visit time prediction, and multi-step trajectory generation through the same next-token decoding step, without task-specific backbones.
-Because predictions are conditioned on the full serialized history, the model can adapt the effective weighting of modalities to each patient's current stage.
-Within this framework we compare three tokenization granularities, visit-level, modality-level, and atomic-event, to characterize the trade-off between context length and per-event supervision density at an otherwise identical backbone and training objective, and we evaluate an optional Hawkes intensity head as a time-aware regularizer on the learned representation.
+In this setup, the conditional density of the next event is captured implicitly through the next-token distribution over that event's serialized tokens, and we show that next-token cross-entropy on the resulting serialization corresponds to a discretized MTPP negative log-likelihood up to tokenizer resolution.
+A single model, trained with continued pretraining followed by supervised fine-tuning, handles diagnosis classification, biomarker regression, inter-visit time prediction, and multi-step trajectory generation through the same next-token decoding step, without task-specific backbones.
+Because predictions are conditioned on the full serialized history, the model can adjust the effective weighting of modalities to each patient's current stage.
+Within this framework we compare three tokenization granularities, visit-level, modality-level, and atomic-event, to map the trade-off between context length and per-event supervision density at an otherwise identical backbone and training objective, and we evaluate an optional Hawkes intensity head as a time-aware regularizer on the learned representation.
 
 \paragraph{Contributions.}
 \begin{itemize}[leftmargin=*,itemsep=2pt,topsep=2pt]
