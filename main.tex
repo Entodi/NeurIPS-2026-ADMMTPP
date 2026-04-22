@@ -58,8 +58,6 @@
 \usepackage{nicefrac}       % compact symbols for 1/2, etc.
 \usepackage{microtype}      % microtypography
 \usepackage{xcolor}         % colors
-\usepackage{algorithm}      % algorithm floats
-\usepackage{algpseudocode}  % pseudocode
 \usepackage{enumitem}       % compact lists
 
 \newcommand{\soe}{\texttt{<SOE>}}
@@ -191,7 +189,6 @@ We treat each patient's longitudinal record as a realization of a generative, ma
 Section~\ref{sec:problem} develops the general formulation and prediction tasks.
 Section~\ref{sec:tokenization} describes three concrete ways to implement this formulation as token sequences, and Sections~\ref{sec:model}--\ref{sec:training} specify the shared backbone and two-stage training recipe used for all three.
 Section~\ref{sec:regularization} introduces an optional intensity-based regularizer on the backbone's representation.
-Section~\ref{sec:inference} covers inference.
 Datasets, feature schema, and experimental protocol are described in Section~\ref{sec:experiments}.
 
 \subsection{Problem Formulation}
@@ -381,34 +378,6 @@ $\gamma$ is linearly warmed from $0$ to $0.1$ over one epoch so that the text ob
 The intensity head is a regularizer only: it shapes the hidden states via back-propagation but is \emph{not} used for generation in this paper.
 Ablations compare each tokenization variant with and without this term at otherwise matched configurations.
 
-\subsection{Inference}
-\label{sec:inference}
-
-\paragraph{Deterministic tasks (T1--T4).}
-We decode greedily at temperature $T_{\text{gen}}=0.05$ with constrained generation for categorical outputs.
-Scalar targets (ADAS, ventricles, inter-visit time) are read either as the generated numerical string or, for variants that emit a quantile token, as the expectation $\hat{y} = \sum_j \mathrm{softmax}(z_{j})\,\mu_j$, where $z_j$ is the logit of the $j$-th bin token and $\mu_j$ the bin mean computed on the training split; the expectation is strictly more informative than the argmax bin.
-
-\paragraph{Trajectory generation (T5).}
-We draw $M{=}100$ trajectories per patient by ancestral sampling at $T_{\text{gen}}=0.7$ conditioned on $\Hcal_k$ followed by $\ttoken{TASK\_TRAJ}$ (Alg.~\ref{alg:traj}).
-Each trajectory is parsed back into events; aggregates across $M$ samples yield event probabilities, expected biomarker curves with Monte-Carlo confidence bands, and a validity rate measuring how many trajectories have well-formed structure and clinically admissible transitions (no AD$\!\to\!$CN reversions).
-
-\begin{algorithm}[t]
-\small
-\caption{Monte-Carlo trajectory generation}
-\label{alg:traj}
-\begin{algorithmic}[1]
-\Require history $\Hcal_k$, sample count $M$, temperature $T_{\text{gen}}$, maximum length $L_{\max}$
-\For{$m = 1, \ldots, M$}
-    \State $\mathrm{seq} \leftarrow \Hcal_k \,\|\, \ttoken{TASK\_TRAJ}$
-    \While{$|\mathrm{seq}| < L_{\max}$ \textbf{and} last token $\neq \eos$}
-        \State $x \sim \mathrm{Cat}\bigl(\mathrm{softmax}(f_\theta(\mathrm{seq}) / T_{\text{gen}})\bigr)$
-        \State $\mathrm{seq} \leftarrow \mathrm{seq} \,\|\, x$
-    \EndWhile
-    \State $\hat{\mathcal{S}}_m \leftarrow \mathrm{Parse}(\mathrm{seq})$
-\EndFor
-\end{algorithmic}
-\end{algorithm}
-
 \section{Experiments}
 \label{sec:experiments}
 
@@ -431,8 +400,28 @@ Each patient has an irregular stream of diagnosis, laboratory, medication, and p
 Four prediction tasks are defined on EDUCATE: binary healthy/non-healthy classification on the full history, five-way class (AD, MCI, FTD, DLB, other) restricted to non-healthy patients, inter-visit interval $\tau_{k+1}$, and multi-step trajectory generation.
 Because diagnosis codes directly encode the class labels, the two classification tasks are additionally evaluated with a \emph{leak-safe} preprocess that removes all dementia/ADRD ICD-10 prefixes (G30, G31, F00--F03, $\ldots$) and SNOMED/text mentions at load time; gaps between the two preprocess variants quantify code-level leakage.
 
+\paragraph{Decoding for diagnosis.}
+For the diagnosis task reported here, we decode greedily at temperature $T_{\text{gen}}=0.05$ with constrained generation over $\{\text{CN},\text{MCI},\text{AD}\}$, conditioned on the tokenized history followed by the task prompt $\ttoken{TASK\_DX}\,\ttoken{h}$.
+The same prompt template is reused across horizons so that a single trained model handles all horizon queries.
+
 \subsection{Results}
 \label{sec:results}
+
+We study how the tokenization granularity of §\ref{sec:tokenization} and the optional intensity regularizer of §\ref{sec:regularization} affect TADPOLE diagnosis prediction.
+All three variants (V, M, A) share the same backbone, adapter, and two-stage training recipe, so any gap in accuracy traces to how the event payload is encoded.
+We then run each variant with and without an auxiliary intensity head at otherwise matched settings, to check whether shaping the backbone's hidden states through a continuous-time intensity loss helps next-token diagnosis prediction; we also compare intensity parameterizations (e.g., Hawkes, Cox).
+
+\paragraph{Headline results on ADNI TADPOLE.}
+[Placeholder: best configuration across tokenization variants and the Hawkes head on 3-way CN/MCI/AD diagnosis at horizon $h$, scored on the D2 rollover split.]
+
+\paragraph{Headline results on EDUCATE.}
+[Placeholder: best configuration across tokenization variants and the Hawkes head on binary healthy/non-healthy classification and on 5-way AD/MCI/FTD/DLB/other classification, under the leak-safe preprocess.]
+
+\paragraph{Tokenization granularity.}
+[Placeholder: diagnosis accuracy for variants V, M, and A on the D2 rollover split at matched backbone, adapter, and training recipe.]
+
+\paragraph{Intensity-head variants.}
+[Placeholder: each tokenization variant with and without the auxiliary intensity head at $\gamma=0.1$, and across intensity parameterizations (e.g., Hawkes, Cox), under the same splits and horizons.]
 
 \section{Conclusion}
 
