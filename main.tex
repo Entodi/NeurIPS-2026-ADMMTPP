@@ -127,49 +127,109 @@
 
 
 \section{Introduction}
+\label{sec:intro}
+
+Alzheimer's disease and related dementias are progressive disorders that unfold over two decades or more, from the earliest preclinical biomarker changes to severe dementia~\citep{self2023emerging}.
+Their progression is staged, and which measurements are informative changes across those stages: fluid or PET biomarkers for amyloid and tau become abnormal earliest while cognition is still intact, structural MRI atrophy (especially in the medial temporal lobe) becomes the dominant signal at the mild cognitive impairment stage, and cognitive and functional decline drive the clinical picture in mild to moderate dementia.
+Across patients, the disease is further heterogeneous, with subtypes that differ in atrophy pattern, cognitive profile, and rate of decline~\citep{young2018uncovering,fereshtehnejad2015new}.
+A predictive model for these conditions must therefore contend with a signal whose informative modality shifts with stage, and with substantial patient-level variability.
+
+Most machine-learning work in this space follows a cross-sectional template: train a separate model for each outcome, each predicting a single target (diagnosis at 24 months, ADAS-Cog at 36 months) from a fixed window of history~\citep{marinescu2019tadpole}.
+Such a template discards the generative link between observations at different times, the trajectory clinicians reason about at the bedside, and cannot adapt its modality weighting to a patient's current stage.
+Two recent strands begin to narrow these gaps: neural and LLM-coupled marked temporal point processes (MTPPs) model irregular event streams as generative processes on general event data~\citep{kong2025language,liu2025tpp,li2026longrange,berghaus2026incontext}, while purpose-built generative transformers over tokenized electronic health records~\citep{renc2024zero,renc2025foundation} show that autoregressive sequence models can forecast clinical outcomes at arbitrary horizons from a single backbone.
+Neither line, however, brings together the inductive biases of a pretrained language model, a principled point-process treatment of irregular timing, and the multimodal, heterogeneous marks of dementia cohorts into a single generative representation learning framework.
+
+We propose such a framework.
+Each patient record is serialized into a modality-tagged, delimited token sequence and a pretrained autoregressive language-model backbone is adapted to it with parameter-efficient fine-tuning; the conditional density of the next event is defined implicitly by the backbone's next-token distribution over that event's tokens, and we show that next-token cross-entropy on the resulting serialization minimizes a discretized MTPP negative log-likelihood up to the tokenizer's numeric resolution.
+A single backbone, trained with a two-stage recipe of continued pretraining followed by task supervised fine-tuning, answers diagnosis classification, biomarker regression, inter-visit time prediction, and multi-step trajectory generation through the same next-token decoding step, so one learned representation supports both trajectory simulation and cross-sectional prediction, and the attention over the serialized history implicitly adapts the effective modality weighting to each patient's current stage.
+Within this framework we study three tokenization variants (visit-level, modality-level, atomic-event) that trade context length against per-event supervision density at otherwise identical backbone and training objective, and an optional Hawkes intensity head that shapes the backbone's hidden states to encode continuous time as a regularizer on the learned representation.
+
+\paragraph{Contributions.}
+\begin{itemize}[leftmargin=*,itemsep=2pt,topsep=2pt]
+    \item A generative representation learning framework for longitudinal clinical records in which a pretrained LLM backbone parameterizes an MTPP through autoregressive token prediction, with a formal link from token-level cross-entropy to the MTPP log-likelihood (§\ref{sec:problem}).
+    \item Three tokenization variants, visit, modality, and atomic-event, that trade context length against supervision density at otherwise identical backbone, adaptation, and training objective (§\ref{sec:tokenization}).
+    \item An empirical study on two dementia cohorts from different sources, the TADPOLE subset of ADNI~\citep{adni,marinescu2018tadpole} and the tertiary-care EHR dataset EDUCATE~\citep{arnrich2024meds}, jointly ablating tokenization granularity and an optional Hawkes regularizer on the backbone's hidden states (§\ref{sec:regularization}) at fixed backbone, adaptation, and training recipe.
+    The present paper reports diagnosis prediction on TADPOLE; the remaining TADPOLE tasks and the EDUCATE cohort are laid out to set the scope of the formulation and are left for future work (§\ref{sec:experiments}).
+\end{itemize}
 
 \section{Related Work}
 \label{sec:related}
 
-Three lines of prior work frame our approach: neural temporal point processes coupled to language models, LLM fine-tuning on natural-language ``pseudo-notes'' rendered from structured EHR, and non-language EHR tokenizers that train sequence models from scratch on custom event vocabularies. We treat them in turn and state where our variants sit relative to each.
+Three lines of prior work frame our approach: neural temporal point processes coupled to language models, LLM fine-tuning on natural-language ``pseudo-notes'' rendered from structured EHR, and non-language EHR tokenizers that train sequence models from scratch on custom event vocabularies.
+We treat them in turn and state where our variants sit relative to each.
 
 \subsection{Neural and LLM-coupled TPPs}
 
-Marked temporal point processes have long been the standard tool for irregular event streams, with neural parameterizations of the conditional intensity developed over the last decade. More recently, several works have tied TPPs to language-model backbones. LanguageTPP~\cite{languagetpp} and TPP-LLM~\cite{tppllm} cast next-event prediction as next-token prediction over a serialized event stream, using an LLM either to emit event distributions directly or to feed an intensity head on top of its hidden states. MM-TPP~\cite{mmtpp} extends this line to multi-modal marks, and OpenFIM~\cite{openfim} proposes a foundation intensity model trained on a broad mixture of heterogeneous event streams. Our work sits in the LLM-coupled family but is distinguished by (i) a controlled ablation over \emph{tokenization granularity} at fixed backbone, adaptation, and training objective, and (ii) treatment of the intensity head as an optional representation regularizer (§\ref{sec:regularization}) rather than the primary output, so that the same model answers both discrete and time-valued tasks by next-token prediction.
+Marked temporal point processes have long been the standard tool for irregular event streams, with neural parameterizations of the conditional intensity developed over the last decade.
+More recently, several works have tied TPPs to language-model backbones.
+LanguageTPP~\cite{kong2025language} and TPP-LLM~\cite{liu2025tpp} cast next-event prediction as next-token prediction over a serialized event stream, using an LLM either to emit event distributions directly or to feed an intensity head on top of its hidden states.
+MM-TPP~\cite{li2026longrange} extends this line to multi-modal marks, and OpenFIM~\cite{berghaus2026incontext} proposes a foundation intensity model trained on a broad mixture of heterogeneous event streams.
+Our work sits in the LLM-coupled family but is distinguished by (i) a controlled ablation over \emph{tokenization granularity} at fixed backbone, adaptation, and training objective, and (ii) treatment of the intensity head as an optional representation regularizer (§\ref{sec:regularization}) rather than the primary output, so that the same model answers both discrete and time-valued tasks by next-token prediction.
 
 \subsection{LLM Fine-Tuning on EHR Pseudo-Notes}
 
-A parallel line of work renders tabular EHR records into natural-language-like sequences (``pseudo-notes'') and fine-tunes a general-purpose LLM on the resulting text. MEME~\cite{meme} is representative: patient events are templated into prose and the LLM is trained to predict downstream clinical outcomes. Pseudo-note approaches inherit the linguistic priors of the backbone but pay a cost in numeric fidelity (scalar biomarkers become loosely formatted text) and in point-process structure (event boundaries and inter-event times are diluted into prose). We keep events as explicitly delimited, modality-typed token strings with dedicated time tokens, which (a) preserves a clean event grid for the MTPP log-likelihood surrogate of Section~\ref{sec:problem} and (b) exposes per-event supervision to the loss.
+A parallel line of work renders tabular EHR records into natural-language-like sequences (``pseudo-notes'') and fine-tunes a general-purpose LLM on the resulting text.
+MEME~\cite{lee2025clinical} is representative: patient events are templated into prose and the LLM is trained to predict downstream clinical outcomes.
+Pseudo-note approaches inherit the linguistic priors of the backbone but pay a cost in numeric fidelity (scalar biomarkers become loosely formatted text) and in point-process structure (event boundaries and inter-event times are diluted into prose).
+We keep events as explicitly delimited, modality-typed token strings with dedicated time tokens, which (a) preserves a clean event grid for the MTPP log-likelihood surrogate of Section~\ref{sec:problem} and (b) exposes per-event supervision to the loss.
 
 \subsection{Non-Language EHR Tokenizers}
 
-Independent of LLMs, several works tokenize clinical events into a purpose-built vocabulary and train a transformer from scratch on the resulting stream. ETHOS~\cite{ethos} encodes patient timelines into a discrete ``health language'' and trains a generative transformer for outcome prediction at arbitrary horizons; ARES~\cite{ares} extends this generative-EHR line and is evaluated on similar prediction tasks. These models share our autoregressive view of a patient record but forgo the linguistic priors of a pretrained LLM and re-learn tokenization, model, and task heads together. Our variants retain the pretrained LLM via 4-bit quantization and LoRA adapters, so the only trainable structure specific to EHR is the vocabulary extension and the (optional) intensity head.
+Independent of LLMs, several works tokenize clinical events into a purpose-built vocabulary and train a transformer from scratch on the resulting stream.
+ETHOS~\cite{renc2024zero} encodes patient timelines into a discrete ``health language'' and trains a generative transformer for outcome prediction at arbitrary horizons; ARES~\cite{renc2025foundation} extends this generative-EHR line and is evaluated on similar prediction tasks.
+These models share our autoregressive view of a patient record but forgo the linguistic priors of a pretrained LLM and re-learn tokenization, model, and task heads together.
+Our variants retain the pretrained LLM via 4-bit quantization and LoRA adapters, so the only trainable structure specific to EHR is the vocabulary extension and the (optional) intensity head.
 
 \section{Method}
 \label{sec:method}
 
-We treat each patient's longitudinal record as a realization of a generative, marked temporal point process (MTPP) and learn it by autoregressive token prediction with a language-model backbone. Section~\ref{sec:problem} develops the general formulation and prediction tasks. Section~\ref{sec:tokenization} describes three concrete ways to implement this formulation as token sequences, and Sections~\ref{sec:model}--\ref{sec:training} specify the shared backbone and two-stage training recipe used for all three. Section~\ref{sec:regularization} introduces an optional intensity-based regularizer on the backbone's representation. Section~\ref{sec:inference} covers inference. Datasets, feature schema, and experimental protocol are described in Section~\ref{sec:experiments}.
+We treat each patient's longitudinal record as a realization of a generative, marked temporal point process (MTPP) and learn it by autoregressive token prediction with a language-model backbone.
+Section~\ref{sec:problem} develops the general formulation and prediction tasks.
+Section~\ref{sec:tokenization} describes three concrete ways to implement this formulation as token sequences, and Sections~\ref{sec:model}--\ref{sec:training} specify the shared backbone and two-stage training recipe used for all three.
+Section~\ref{sec:regularization} introduces an optional intensity-based regularizer on the backbone's representation.
+Section~\ref{sec:inference} covers inference.
+Datasets, feature schema, and experimental protocol are described in Section~\ref{sec:experiments}.
 
 \subsection{Problem Formulation}
 \label{sec:problem}
 
-Let $\mathcal{S} = \{(t_k, \mathbf{x}_k)\}_{k=1}^{K}$ denote a patient record with $K$ observations, where $t_k \in \mathbb{R}_{\geq 0}$ is the time since baseline (months) and $\mathbf{x}_k$ is a heterogeneous, possibly partially observed mark comprising diagnostic labels, cognitive scores, neuroimaging summaries, and structured codes. Time-invariant covariates (sex, education, APOE-$\varepsilon$4 genotype, baseline age) are collected in a context vector $\mathbf{c}$. We write $\Hcal_k = \{(\mathbf{c}, (t_1, \mathbf{x}_1), \ldots, (t_k, \mathbf{x}_k))\}$ for the history up to and including the $k$-th observation and $\tau_k = t_k - t_{k-1}$ for the inter-observation interval.
+Let $\mathcal{S} = \{(t_k, \mathbf{x}_k)\}_{k=1}^{K}$ denote a patient record with $K$ observations, where $t_k \in \mathbb{R}_{\geq 0}$ is the time since baseline (months) and $\mathbf{x}_k$ is a heterogeneous, possibly partially observed mark comprising diagnostic labels, cognitive scores, neuroimaging summaries, and structured codes.
+Time-invariant covariates (sex, education, APOE-$\varepsilon$4 genotype, baseline age) are collected in a context vector $\mathbf{c}$.
+We write $\Hcal_k = \{(\mathbf{c}, (t_1, \mathbf{x}_1), \ldots, (t_k, \mathbf{x}_k))\}$ for the history up to and including the $k$-th observation and $\tau_k = t_k - t_{k-1}$ for the inter-observation interval.
 
-A marked temporal point process is characterized by the conditional density of the next event given the history,
+A marked temporal point process is characterized by the conditional density of the next event given the history~\citep{daley2003introduction,shchur2021neural},
 \begin{equation}
     p^*(t_{k+1}, \mathbf{x}_{k+1} \mid \Hcal_k)
     \;=\; \lambda^*(t_{k+1}, \mathbf{x}_{k+1}) \,
           \exp\!\Bigl(-\!\!\int_{t_k}^{t_{k+1}}\!\!\int \lambda^*(s, \mathbf{x})\,d\mathbf{x}\,ds\Bigr),
     \label{eq:mtpp}
 \end{equation}
-with conditional intensity $\lambda^*(\cdot \mid \Hcal_k)$. Rather than parameterize $\lambda^*$ directly, we serialize each patient record into a single discrete token sequence $s_{1:L}$---an ordered, delimited encoding of the static context $\mathbf{c}$ and the events $\{(\tau_k, \mathbf{x}_k)\}_{k=1}^{K}$, detailed in Section~\ref{sec:tokenization}---and fit an autoregressive language model that factorizes this sequence by the chain rule,
+with conditional intensity $\lambda^*(\cdot \mid \Hcal_k)$.
+Iterating the chain rule, the joint density of a full record factorizes into per-event conditionals,
 \begin{equation}
-    p_\theta(s_{1:L}) \;=\; \prod_{\ell=1}^{L} p_\theta(s_\ell \mid s_{<\ell}).
+    p^*\!\bigl(\{(\tau_k, \mathbf{x}_k)\}_{k=1}^{K} \,\big|\, \mathbf{c}\bigr)
+    \;=\; \prod_{k=1}^{K} p^*(\tau_k, \mathbf{x}_k \mid \Hcal_{k-1}),
+    \label{eq:mtpp_joint}
+\end{equation}
+so the MTPP negative log-likelihood of a record is the sum of the per-event log-densities of Eq.~\eqref{eq:mtpp}.
+
+Rather than parameterize $\lambda^*$ directly, we serialize the record into a token sequence via a deterministic, delimited map
+\[
+    \phi \colon \bigl(\mathbf{c},\, \{(\tau_k, \mathbf{x}_k)\}_{k=1}^K\bigr)
+    \;\longmapsto\;
+    s_{1:L} \;=\; \bigl(s^{(c)},\, s^{(1)},\, \ldots,\, s^{(K)}\bigr),
+\]
+where $s^{(c)}$ encodes the static context and each event block $s^{(k)}$ encodes the inter-event time $\tau_k$ and mark $\mathbf{x}_k$ of visit $k$ (Section~\ref{sec:tokenization}).
+An autoregressive language model factorizes $s_{1:L}$ by the chain rule, which we regroup by event blocks:
+\begin{equation}
+    p_\theta(s_{1:L})
+    \;=\; \prod_{\ell=1}^{L} p_\theta(s_\ell \mid s_{<\ell})
+    \;=\; p_\theta\!\bigl(s^{(c)}\bigr) \prod_{k=1}^{K} p_\theta\!\bigl(s^{(k)} \,\big|\, s^{(c)}, s^{(<k)}\bigr).
     \label{eq:ar}
 \end{equation}
-Because the serialization is invertible up to fixed delimiters, the token-level likelihood of Eq.~\eqref{eq:ar} induces an implicit density $p_\theta(\tau_{k+1}, \mathbf{x}_{k+1} \mid \Hcal_k)$ on the original MTPP events: conditioning on the tokens of $\Hcal_k$ and reading off the tokens of the next event recovers the conditional density of Eq.~\eqref{eq:mtpp}. Next-token cross-entropy is therefore a valid surrogate for the MTPP log-likelihood. This reformulation (i)~reuses a pretrained language-model backbone in place of a bespoke intensity network, (ii)~handles heterogeneous marks---categorical, ordinal, and continuous---under a single objective, and (iii)~unifies classification, regression, and forecasting as conditional next-token prediction.
-
-\paragraph{Prediction tasks.} Given a history $\Hcal_k$ and a horizon $h>0$, we define five tasks on which the same generative model is evaluated: (T1) diagnosis at horizon $h$ (3-way for TADPOLE; binary and 5-way for EDUCATE); (T2) ADAS-Cog at $h$ (TADPOLE only); (T3) ventricle-to-intracranial-volume ratio at $h$ (TADPOLE only); (T4) inter-visit interval $\tau_{k+1}$; and (T5) multi-step trajectory generation, in which $M$ future sequences are drawn by ancestral sampling. T1--T3 match established cross-sectional benchmarks; T4--T5 are enabled by the point-process formulation and have no cross-sectional counterpart. Experiments in this paper report T1; remaining tasks are reserved for future work and included here to clarify the scope of the generative formulation.
+Because $\phi$ is injective on its image, each event-block factor $p_\theta\!\bigl(s^{(k)} \mid s^{(c)}, s^{(<k)}\bigr)$ is a parametric surrogate for the MTPP conditional $p^*(\tau_k, \mathbf{x}_k \mid \Hcal_{k-1})$, with continuous marks resolved to the tokenizer's numeric precision.
+Token-level cross-entropy on $s_{1:L}$ therefore minimizes a discretized negative log-likelihood of Eq.~\eqref{eq:mtpp_joint}~\citep{liu2025tpp,kong2025language}.
+This reformulation (i)~reuses a pretrained language-model backbone in place of a bespoke intensity network, (ii)~handles heterogeneous marks---categorical, ordinal, and continuous---under a single objective, and (iii)~unifies classification, regression, and forecasting as conditional next-token prediction.
 
 \subsection{Three Granularity Variants}
 \label{sec:tokenization}
@@ -182,50 +242,69 @@ All variants share a structural template for each patient:
     \eos,
     \label{eq:template}
 \end{equation}
-and differ only in how the event payload $E(\mathbf{x}_k)$ is decomposed. The three variants trade off context length against the density of supervision (fraction of tokens under a cross-entropy loss whose prefix varies across visits). Let $F$ denote the number of observed feature dimensions at visit $k$ and $G$ the number of modality groups (imaging, cognitive, diagnosis, and, for EDUCATE, lab / medication / procedure).
+and differ only in how the event payload $E(\mathbf{x}_k)$ is decomposed.
+The three variants trade off context length against the density of supervision (fraction of tokens under a cross-entropy loss whose prefix varies across visits).
+Let $F$ denote the number of observed feature dimensions at visit $k$ and $G$ the number of modality groups (imaging, cognitive, diagnosis, and, for EDUCATE, lab / medication / procedure).
 
-\paragraph{(V) Visit-level encoding.} One event per visit. $E(\mathbf{x}_k)$ is a single row containing all observed feature--value pairs for that visit. This is the most compact representation: a 10-visit TADPOLE patient uses roughly 10 rows, fits comfortably in a 4{,}096-token window, and preserves all same-visit correlations at the cost of coarse per-event supervision.
+\paragraph{(V) Visit-level encoding.}
+One event per visit.
+$E(\mathbf{x}_k)$ is a single row containing all observed feature--value pairs for that visit.
+This is the most compact representation: a 10-visit TADPOLE patient uses roughly 10 rows, fits comfortably in a 4{,}096-token window, and preserves all same-visit correlations at the cost of coarse per-event supervision.
 
-\paragraph{(M) Modality-level encoding.} One event per modality group observed at the visit. $E(\mathbf{x}_k)$ is split into $G$ sub-rows sharing a timestamp, each carrying only the features of its group (e.g., an imaging sub-event with MRI summaries, a cognitive sub-event with MMSE/CDRSB/ADAS). Missing modalities are omitted rather than flagged, yielding a native handling of block-structured missingness.
+\paragraph{(M) Modality-level encoding.}
+One event per modality group observed at the visit.
+$E(\mathbf{x}_k)$ is split into $G$ sub-rows sharing a timestamp, each carrying only the features of its group (e.g., an imaging sub-event with MRI summaries, a cognitive sub-event with MMSE/CDRSB/ADAS).
+Missing modalities are omitted rather than flagged, yielding a native handling of block-structured missingness.
 
-\paragraph{(A) Atomic-event encoding.} One event per individual measurement. $E(\mathbf{x}_k)$ is decomposed into $F$ single-feature events of the form \ttoken{feat}$\;|\;t\;|\;v$. This gives the finest per-token supervision (one loss boundary per measurement) and the cleanest treatment of feature-wise missingness, at the cost of $F{-}1$ extra timestamp repetitions per visit.
+\paragraph{(A) Atomic-event encoding.}
+One event per individual measurement.
+$E(\mathbf{x}_k)$ is decomposed into $F$ single-feature events of the form \ttoken{feat}$\;|\;t\;|\;v$.
+This gives the finest per-token supervision (one loss boundary per measurement) and the cleanest treatment of feature-wise missingness, at the cost of $F{-}1$ extra timestamp repetitions per visit.
 
-Numerical values are emitted as text at the backbone tokenizer's native resolution; categorical labels (diagnosis, ICD/SNOMED codes) use a small set of added vocabulary items that we insert into the tokenizer and initialize from the mean of existing embeddings. Task prompts are appended after the history as $\ttoken{TASK\_*} \, \ttoken{horizon}$ so a single model answers all five tasks and multiple horizons from a shared backbone.
+Numerical values are emitted as text at the backbone tokenizer's native resolution; categorical labels (diagnosis, ICD/SNOMED codes) use a small set of added vocabulary items that we insert into the tokenizer and initialize from the mean of existing embeddings.
+Task prompts are appended after the history as $\ttoken{TASK\_*} \, \ttoken{horizon}$ so a single model answers all five tasks and multiple horizons from a shared backbone.
 
 \subsection{Model and Adaptation}
 \label{sec:model}
 
-We use a causal language model $f_\theta$ as the backbone. Unless stated otherwise, $f_\theta$ is Qwen3.5 (0.8\,B and 2\,B variants studied), loaded in 4-bit NF4 quantization. For variants that introduce new tokens (category labels, modality tags, horizon bins), we extend the tokenizer and resize the embedding and output-projection matrices; new rows are initialized to the mean of the pretrained rows.
+We use a causal language model $f_\theta$ as the backbone.
+Unless stated otherwise, $f_\theta$ is Qwen3.5 (0.8\,B and 2\,B variants studied), loaded in 4-bit NF4 quantization.
+For variants that introduce new tokens (category labels, modality tags, horizon bins), we extend the tokenizer and resize the embedding and output-projection matrices; new rows are initialized to the mean of the pretrained rows.
 
-Trainable parameters are restricted to (i)~Low-Rank Adaptation \cite{hu2022lora} inserted in the attention and MLP projections ($\texttt{q,k,v,o\_proj}$, $\texttt{gate,up,down\_proj}$) as
-$W = W_0 + (\alpha/r)\, B A$ with $r=16$, $\alpha=64$, dropout $0.1$, and (ii)~the new token rows and the language-model head. This reaches roughly $0.5\%$ of the backbone's parameters and fits on a single A100 80\,GB.
+Trainable parameters are restricted to (i)~Low-Rank Adaptation \cite{hu2022lora} inserted in the attention and MLP projections ($\texttt{q,k,v,o\_proj}$, $\texttt{gate,up,down\_proj}$) as $W = W_0 + (\alpha/r)\, B A$ with $r=16$, $\alpha=64$, dropout $0.1$, and (ii)~the new token rows and the language-model head.
+This reaches roughly $0.5\%$ of the backbone's parameters and fits on a single A100 80\,GB.
 
 \subsection{Two-Stage Training}
 \label{sec:training}
 
 All three variants follow the same two-stage recipe, differing only in the token stream produced by their $E(\cdot)$.
 
-\textbf{Stage~1 (continued pretraining).} For each patient with $K$ observations we emit every prefix of length $2,\ldots,K$ as an independent sequence (sub-sequence augmentation), which expands $\sim$1{,}700 TADPOLE patients into $\sim$10{,}000 sequences. The objective is next-token cross-entropy over the full sequence:
+\textbf{Stage~1 (continued pretraining).}
+For each patient with $K$ observations we emit every prefix of length $2,\ldots,K$ as an independent sequence (sub-sequence augmentation), which expands $\sim$1{,}700 TADPOLE patients into $\sim$10{,}000 sequences.
+The objective is next-token cross-entropy over the full sequence:
 \begin{equation}
     \mathcal{L}_{\text{S1}}(\theta)
     \;=\; -\frac{1}{L} \sum_{\ell=1}^{L} \log p_\theta(s_\ell \mid s_{<\ell}).
     \label{eq:loss_s1}
 \end{equation}
 
-\textbf{Stage~2 (task supervised fine-tuning).} For each valid split point we construct prompt--response pairs $(P, R)$ where $P$ is the tokenized history followed by $\ttoken{TASK\_*}$ and a horizon token, and $R$ is the target. Examples across the five tasks are mixed. The loss is computed only on the response tokens:
+\textbf{Stage~2 (task supervised fine-tuning).}
+For each valid split point we construct prompt--response pairs $(P, R)$ where $P$ is the tokenized history followed by $\ttoken{TASK\_*}$ and a horizon token, and $R$ is the target.
+Examples across the five tasks are mixed.
+The loss is computed only on the response tokens:
 \begin{equation}
     \mathcal{L}_{\text{S2}}(\theta)
     \;=\; -\frac{1}{|R|} \sum_{\ell=1}^{|R|} \log p_\theta(r_\ell \mid P, r_{<\ell}).
     \label{eq:loss_s2}
 \end{equation}
-We study two regimes: \emph{next-visit} ($R$ targets only the immediate next observation) and \emph{horizon-conditioned} ($R$ targets any future observation whose offset matches the horizon token in $P$, so one model answers arbitrary horizons). Hyperparameters (learning rate $10^{-4}$ in both stages, effective batch size $16$, 5--9 epochs) are listed in Appendix.
+We study two regimes: \emph{next-visit} ($R$ targets only the immediate next observation) and \emph{horizon-conditioned} ($R$ targets any future observation whose offset matches the horizon token in $P$, so one model answers arbitrary horizons).
+Hyperparameters (learning rate $10^{-4}$ in both stages, effective batch size $16$, 5--9 epochs) are listed in Appendix.
 
 \subsection{Regularizing the Representation}
 \label{sec:regularization}
 
-The token-level objective of Eqs.~\eqref{eq:loss_s1}--\eqref{eq:loss_s2} treats inter-event time only through its surface form: the tokens of $T(\tau_k)$ appear in the loss exactly as any other symbol, and nothing in the objective encourages the backbone's hidden states to encode time continuously. As an \emph{optional} regularizer on the learned representation, we attach small per-mark projections
-$(\mu_m, \alpha_m, \beta_m) = \mathrm{softplus}\bigl(W_{\{\mu,\alpha,\beta\},m}\, h_k\bigr)$
-from the backbone's last hidden state $h_k$ at event positions, and define a piecewise Hawkes intensity
+The token-level objective of Eqs.~\eqref{eq:loss_s1}--\eqref{eq:loss_s2} treats inter-event time only through its surface form: the tokens of $T(\tau_k)$ appear in the loss exactly as any other symbol, and nothing in the objective encourages the backbone's hidden states to encode time continuously.
+As an \emph{optional} regularizer on the learned representation, we attach small per-mark projections $(\mu_m, \alpha_m, \beta_m) = \mathrm{softplus}\bigl(W_{\{\mu,\alpha,\beta\},m}\, h_k\bigr)$ from the backbone's last hidden state $h_k$ at event positions, and define a piecewise Hawkes intensity
 \begin{equation}
     \lambda_m(t \mid \Hcal_k)
     \;=\; \mu_m + \!\!\sum_{j:\, t_j < t,\; m_j = m}\!\! (\alpha_m - \mu_m)\, e^{-\beta_m (t - t_j)}.
@@ -237,15 +316,21 @@ Stage~2 then minimizes $\mathcal{L} = \mathcal{L}_{\text{S2}} + \gamma\,\mathcal
     \;=\; \int_0^{T} \sum_m \lambda_m(s)\, ds \;-\; \sum_{k=1}^{K} \log \lambda_{m_k}(t_k),
     \label{eq:nll}
 \end{equation}
-computed by trapezoidal quadrature on the per-event intensities of Eq.~\eqref{eq:hawkes}. $\gamma$ is linearly warmed from $0$ to $0.1$ over one epoch so that the text objective is established before the intensity head contributes gradients. The intensity head is a regularizer only: it shapes the hidden states via back-propagation but is \emph{not} used for generation in this paper. Ablations compare each tokenization variant with and without this term at otherwise matched configurations.
+computed by trapezoidal quadrature on the per-event intensities of Eq.~\eqref{eq:hawkes}.
+$\gamma$ is linearly warmed from $0$ to $0.1$ over one epoch so that the text objective is established before the intensity head contributes gradients.
+The intensity head is a regularizer only: it shapes the hidden states via back-propagation but is \emph{not} used for generation in this paper.
+Ablations compare each tokenization variant with and without this term at otherwise matched configurations.
 
 \subsection{Inference}
 \label{sec:inference}
 
-\paragraph{Deterministic tasks (T1--T4).} We decode greedily at temperature $T_{\text{gen}}=0.05$ with constrained generation for categorical outputs. Scalar targets (ADAS, ventricles, inter-visit time) are read either as the generated numerical string or, for variants that emit a quantile token, as the expectation
-$\hat{y} = \sum_j \mathrm{softmax}(z_{j})\,\mu_j$, where $z_j$ is the logit of the $j$-th bin token and $\mu_j$ the bin mean computed on the training split; the expectation is strictly more informative than the argmax bin.
+\paragraph{Deterministic tasks (T1--T4).}
+We decode greedily at temperature $T_{\text{gen}}=0.05$ with constrained generation for categorical outputs.
+Scalar targets (ADAS, ventricles, inter-visit time) are read either as the generated numerical string or, for variants that emit a quantile token, as the expectation $\hat{y} = \sum_j \mathrm{softmax}(z_{j})\,\mu_j$, where $z_j$ is the logit of the $j$-th bin token and $\mu_j$ the bin mean computed on the training split; the expectation is strictly more informative than the argmax bin.
 
-\paragraph{Trajectory generation (T5).} We draw $M{=}100$ trajectories per patient by ancestral sampling at $T_{\text{gen}}=0.7$ conditioned on $\Hcal_k$ followed by $\ttoken{TASK\_TRAJ}$ (Alg.~\ref{alg:traj}). Each trajectory is parsed back into events; aggregates across $M$ samples yield event probabilities, expected biomarker curves with Monte-Carlo confidence bands, and a validity rate measuring how many trajectories have well-formed structure and clinically admissible transitions (no AD$\!\to\!$CN reversions).
+\paragraph{Trajectory generation (T5).}
+We draw $M{=}100$ trajectories per patient by ancestral sampling at $T_{\text{gen}}=0.7$ conditioned on $\Hcal_k$ followed by $\ttoken{TASK\_TRAJ}$ (Alg.~\ref{alg:traj}).
+Each trajectory is parsed back into events; aggregates across $M$ samples yield event probabilities, expected biomarker curves with Monte-Carlo confidence bands, and a validity rate measuring how many trajectories have well-formed structure and clinically admissible transitions (no AD$\!\to\!$CN reversions).
 
 \begin{algorithm}[t]
 \small
@@ -270,11 +355,21 @@ $\hat{y} = \sum_j \mathrm{softmax}(z_{j})\,\mu_j$, where $z_j$ is the logit of t
 \subsection{Experimental Setup}
 \label{sec:setup}
 
-\paragraph{TADPOLE (ADNI).} The TADPOLE challenge subset of ADNI \cite{adni,marinescu2018tadpole} provides $\sim$1{,}700 patients in the training split (D1) with at least two visits each and a held-out rollover split (D2). Each visit yields up to eleven features: diagnosis $d \in \{\text{CN},\text{MCI},\text{AD}\}$, cognitive scores (MMSE, CDRSB, ADAS-13), and four MRI summaries (ventricles, hippocampus, whole brain, intracranial volume; ventricles and hippocampus are reported as ICV ratios). Four static attributes ($\mathbf{c}$) are sex, years of education, APOE-$\varepsilon$4 allele count, and baseline age.
-
-\paragraph{EDUCATE.} EDUCATE is a tertiary-care electronic health record dataset covering dementia and related disorders, harmonized to OMOP concepts and MEDS events \cite{arnrich2024meds}. Each patient has an irregular stream of diagnosis, laboratory, medication, and procedure events with absolute timestamps. Targets are a binary healthy/non-healthy label (T1-binary) and a five-way class label (AD, MCI, FTD, DLB, other) restricted to non-healthy patients. Because diagnosis codes directly encode the label, we additionally evaluate with a \emph{leak-safe} preprocess that removes all dementia/ADRD ICD-10 prefixes (G30, G31, F00--F03, $\ldots$) and SNOMED/text mentions at load time; gaps between the two preprocess variants quantify code-level leakage.
-
 Both datasets follow the same abstract schema $(t_k, \mathbf{x}_k)$ with $\mathbf{x}_k$ structured as modality-typed sub-vectors, so the three model variants of Section~\ref{sec:tokenization} apply uniformly; dataset-specific feature lists are deferred to Appendix.
+Prediction tasks are defined per dataset, as the two sources differ in the targets available.
+
+\paragraph{TADPOLE (ADNI).}
+The TADPOLE challenge subset of ADNI \cite{adni,marinescu2018tadpole} provides $\sim$1{,}700 patients in the training split (D1) with at least two visits each and a held-out rollover split (D2).
+Each visit yields up to eleven features: diagnosis $d \in \{\text{CN},\text{MCI},\text{AD}\}$, cognitive scores (MMSE, CDRSB, ADAS-13), and four MRI summaries (ventricles, hippocampus, whole brain, intracranial volume; ventricles and hippocampus are reported as ICV ratios).
+Four static attributes ($\mathbf{c}$) are sex, years of education, APOE-$\varepsilon$4 allele count, and baseline age.
+Given a history $\Hcal_k$ and horizon $h>0$, we define five prediction tasks on TADPOLE: diagnosis at $h$ (3-way CN/MCI/AD), ADAS-Cog at $h$, ventricle-to-ICV ratio at $h$, inter-visit interval $\tau_{k+1}$, and multi-step trajectory generation by ancestral sampling.
+Experiments in this paper report diagnosis; the remaining four are reserved for future work.
+
+\paragraph{EDUCATE.}
+EDUCATE is a tertiary-care electronic health record dataset covering dementia and related disorders, harmonized to OMOP concepts and MEDS events \cite{arnrich2024meds}.
+Each patient has an irregular stream of diagnosis, laboratory, medication, and procedure events with absolute timestamps.
+Four prediction tasks are defined on EDUCATE: binary healthy/non-healthy classification on the full history, five-way class (AD, MCI, FTD, DLB, other) restricted to non-healthy patients, inter-visit interval $\tau_{k+1}$, and multi-step trajectory generation.
+Because diagnosis codes directly encode the class labels, the two classification tasks are additionally evaluated with a \emph{leak-safe} preprocess that removes all dementia/ADRD ICD-10 prefixes (G30, G31, F00--F03, $\ldots$) and SNOMED/text mentions at load time; gaps between the two preprocess variants quantify code-level leakage.
 
 \subsection{Results}
 \label{sec:results}
