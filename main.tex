@@ -156,7 +156,6 @@ Within this setup we compare three tokenization granularities, visit-level, moda
     \item Three tokenization variants, visit, modality, and atomic-event, that trade context length against per-event supervision density at an otherwise identical backbone, adaptation, and training objective (§\ref{sec:tokenization}).
     \item A suite of auxiliary heads (Hawkes NLL, Cox partial likelihood, ordinal regression) on the backbone's hidden states (§\ref{sec:regularization}) as different ways to shape the learned representation, evaluated against a pure next-token baseline.
     \item An empirical study on two ADRD cohorts, the TADPOLE subset of ADNI~\citep{adni,marinescu2019tadpole} and the tertiary-care EHR dataset EDUCATE, jointly ablating tokenization granularity and the auxiliary-head choice at fixed backbone, adaptation, and training recipe.
-    The present paper reports diagnosis prediction on TADPOLE. The remaining TADPOLE tasks and the EDUCATE cohort are laid out to set the scope of the formulation and are left for future work (§\ref{sec:experiments}).
 \end{itemize}
 
 \section{Related Work}
