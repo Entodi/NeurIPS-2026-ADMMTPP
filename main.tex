@@ -138,7 +138,7 @@ Molecular and fluid biomarkers tend to be most informative in early stages, whil
 ADRD also differs widely across patients, with subtypes that vary in clinical presentation, progression pattern, and rate of decline~\citep{young2018uncovering,fereshtehnejad2015new}.
 Predictive models therefore have to handle both shifts over time in which modalities matter most and large variability between patients.
 
-A multimodal predictive model for ADRD should track the patient's trajectory across modalities and over time, since the clinically relevant signal lives in how cognitive scores, biomarkers, and imaging evolve together. Most existing pipelines do not do this. Cross-sectional TADPOLE-style setups train a separate model per outcome from a fixed historical window, for example diagnosis at 24 months or ADAS-Cog at 36 months~\citep{marinescu2019tadpole}. Recent multimodal agentic pipelines fuse notes, imaging, and EHR across per-modality agents, but their EHR agent collapses the patient's visit history to a single feature vector (e.g.\ max-pooled over visits) before fitting the downstream head~\citep{liu2026multidisciplinary}; the multimodal fusion is rich, but the temporal trajectory is flattened out.
+In ADRD, the prognostically informative signal is the joint evolution of cognitive scores, fluid and imaging biomarkers, and clinical events across visits, so a multimodal predictive model needs to represent the patient's trajectory rather than a static summary of it. Most current pipelines do the opposite. Cross-sectional benchmarks such as TADPOLE train a separate model per outcome from a fixed historical window, for example diagnosis at 24 months or ADAS-Cog at 36 months~\citep{marinescu2019tadpole}. Recent multimodal agentic pipelines fuse notes, imaging, and structured EHR through per-modality agents, but the EHR agent reduces each patient's visit history to a single feature vector, for example by max-pooling features over visits, before fitting the downstream classification or survival head~\citep{liu2026multidisciplinary}. The multimodal fusion is rich, but the temporal structure of the record is discarded before the label is predicted.
 Two adjacent lines of work already know how to keep irregular time in the representation.
 Marked temporal point processes (MTPPs), including neural and LLM-coupled variants, give density models for irregularly timed event streams~\citep{kong2025language,liu2025tpp,li2026longrange,berghaus2026incontext}.
 Autoregressive transformers trained on tokenized electronic health records support arbitrary-horizon forecasting from a shared sequence backbone~\citep{renc2024zero,renc2025foundation}.
@@ -148,7 +148,7 @@ We treat each patient history as a realization of a marked temporal point proces
 Each visit is serialized as a modality-tagged, delimited token sequence, and the backbone is adapted to it with parameter-efficient fine-tuning.
 Next-token cross-entropy on this serialization corresponds to a discretized MTPP negative log-likelihood up to tokenizer resolution, so the backbone's hidden state becomes a learned multimodal event representation under a generative point-process objective.
 The same representation supports diagnosis classification, biomarker regression, inter-visit time prediction, and multi-step trajectory generation through the same next-token decoding step, with no task-specific backbone and no collapse of the time axis.
-Within this setup we compare three tokenization granularities, visit-level, modality-level, and atomic-event, to map the trade-off between context length and per-event supervision density, and we study a set of auxiliary heads (Hawkes intensity, Cox partial hazard, ordinal diagnosis) as different ways to shape the hidden state; the auxiliary heads supervise the representation and are not used for decoding.
+Within this setup we compare three tokenization granularities, visit-level, modality-level, and atomic-event, to map the trade-off between context length and per-event supervision density, and we study a set of auxiliary heads (Hawkes intensity, Cox partial hazard, ordinal diagnosis) as different ways to shape the hidden state. The auxiliary heads supervise the representation and are not used for decoding.
 
 \paragraph{Contributions.}
 \begin{itemize}[leftmargin=*,itemsep=2pt,topsep=2pt]
@@ -166,7 +166,7 @@ We treat them in turn and state where our variants sit relative to each.
 
 \subsection{Multimodal Dementia Prediction}
 
-Multimodal pipelines for ADRD tend to fuse across modalities while compressing the time axis of each patient's record. The TADPOLE challenge~\citep{marinescu2019tadpole} trains a separate model per outcome and fixed horizon from a hand-chosen historical window, and subsequent multimodal pipelines keep this style while adding modalities. Recent agentic pipelines such as the one of~\citet{liu2026multidisciplinary} run per-modality agents over EHR, clinical notes, and imaging that each emit a prediction and supporting evidence, and aggregate through a summary agent; their EHR agent collapses the visit history to a single feature vector by max-pooling over visits before fitting a classification or survival head. We study whether a generative representation-learning model that keeps the per-patient trajectory in the representation is useful for ADRD prediction: the backbone ingests the full token stream of the visit history under a point-process objective, and every prediction is read off the same representation by next-token decoding.
+Multimodal pipelines for ADRD tend to fuse across modalities while compressing the time axis of each patient's record. The TADPOLE challenge~\citep{marinescu2019tadpole} trains a separate model per outcome and fixed horizon from a hand-chosen historical window, and subsequent multimodal pipelines keep this style while adding modalities. Recent agentic pipelines~\citep{liu2026multidisciplinary} run per-modality agents over EHR, clinical notes, and imaging that each emit a prediction and supporting evidence, and aggregate them through a summary agent. The EHR agent there, however, collapses a patient's visit history to a single feature vector by max-pooling over visits before fitting a classification or survival head, so the multimodal fusion is rich but the temporal structure of the record is not propagated into the prediction. In this paper we study whether a generative representation-learning model that keeps the per-patient trajectory in the representation is useful for ADRD prediction. The backbone ingests the full token stream of the visit history under a point-process objective, and every prediction is read off the same representation by next-token decoding.
 
 \subsection{Neural and LLM-coupled TPPs}
 
@@ -427,7 +427,7 @@ Within-batch ties are handled by the Breslow approximation~\citep{breslow1972con
 Two sub-variants are considered: an accumulated-risk-set form that buffers negatives across mini-batches~\citep{katzman2018deepsurv,kvamme2019time}, and an attention-pooled form in which $f$ reads an attention-weighted average over the history's hidden states rather than the last one, using the self-attentive pooling~\citep{lin2017structured}.
 
 \paragraph{Ordinal head.}
-Diagnosis labels admit a natural order CN\,$<$\,MCI\,$<$\,AD, so we additionally consider a two-logit ordinal head that minimizes cumulative binary cross-entropy on the thresholded predictions $P(d > \text{CN} \mid h_k)$ and $P(d > \text{MCI} \mid h_k)$, following the cumulative-link ordinal formulation of~\citet{frank2001simple} and its deep-network version~\citep{niu2016ordinal}, which casts a $K$-class ordinal problem as $K{-}1$ binary predictions $P(d > c_k)$ at each class threshold.
+Diagnosis labels admit a natural order CN\,$<$\,MCI\,$<$\,AD, so we additionally consider a two-logit ordinal head that minimizes cumulative binary cross-entropy on the thresholded predictions $P(d > \text{CN} \mid h_k)$ and $P(d > \text{MCI} \mid h_k)$, following the cumulative-link ordinal formulation~\citep{frank2001simple} and its deep-network version~\citep{niu2016ordinal}, which casts a $K$-class ordinal problem as $K{-}1$ binary predictions $P(d > c_k)$ at each class threshold.
 This head carries no timing information. It tests whether an order-aware classification signal, independent of point-process structure, suffices to shape the hidden states.
 
 \section{Experiments}
@@ -551,7 +551,7 @@ A learned query $q \in \mathbb{R}^d$ attends over the full history $\{h_1, \ldot
     \;=\; \sum_k \alpha_k\, h_k,
     \label{eq:attn_pool}
 \end{equation}
-after which the log-hazard is $f(\bar h) = w^\top \bar h + b$, following the self-attentive pooling of~\citet{lin2017structured}.
+after which the log-hazard is $f(\bar h) = w^\top \bar h + b$, following self-attentive pooling~\citep{lin2017structured}.
 Eq.~\eqref{eq:cox_app} is then applied on the attention-pooled log-hazards.
 
 \subsubsection{Ordinal cumulative BCE}
