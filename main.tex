@@ -249,6 +249,62 @@ All variants share a structural template for each patient:
 and differ only in how the event payload $E(\mathbf{x}_k)$ is decomposed.
 The three variants trade off context length against the density of supervision (fraction of tokens under a cross-entropy loss whose prefix varies across visits).
 Let $F$ denote the number of observed feature dimensions at visit $k$ and $G$ the number of modality groups (imaging, cognitive, diagnosis, and, for EDUCATE, lab / medication / procedure).
+Figure~\ref{fig:granularity} shows the same two-visit history under each variant.
+
+\begin{figure}[t]
+\centering
+\scriptsize
+\setlength{\tabcolsep}{3pt}
+\renewcommand{\arraystretch}{1.15}
+\begin{tabular}{@{}p{0.28\linewidth} p{0.30\linewidth} p{0.38\linewidth}@{}}
+\toprule
+\textbf{(V) Visit-level} & \textbf{(M) Modality-level} & \textbf{(A) Atomic-event} \\
+1 event / visit & $G$ events / visit & $F$ events / visit \\
+\midrule
+\ttfamily
+\bos\ age=72,sex=F\newline
+\soe\ \ttoken{t=0m}\newline
+Hipp=7000\textbar Vent=42000\textbar\newline
+DX=CN\ \eoe\newline
+\soe\ \ttoken{t=12m}\newline
+Hipp=6500\textbar Vent=48000\textbar\newline
+MMSE=27\textbar ADAS=15\textbar\newline
+DX=MCI\ \eoe\newline
+\ttoken{TASK\_DX}\ \ttoken{h=12m}
+&
+\ttfamily
+\bos\ age=72,sex=F\newline
+\soe\ \ttoken{t=0m}\ \ttoken{IMG}\newline
+Hipp=7000\textbar Vent=42000\ \eoe\newline
+\soe\ \ttoken{t=0m}\ \ttoken{DX}\ CN\ \eoe\newline
+\soe\ \ttoken{t=12m}\ \ttoken{IMG}\newline
+Hipp=6500\textbar Vent=48000\ \eoe\newline
+\soe\ \ttoken{t=12m}\ \ttoken{COG}\newline
+MMSE=27\textbar ADAS=15\ \eoe\newline
+\soe\ \ttoken{t=12m}\ \ttoken{DX}\ MCI\ \eoe\newline
+\ttoken{TASK\_DX}\ \ttoken{h=12m}
+&
+\ttfamily
+\bos\ age=72,sex=F\newline
+\soe\ \ttoken{t=0m}\ \ttoken{Hipp}\ 7000\ \eoe\newline
+\soe\ \ttoken{t=0m}\ \ttoken{Vent}\ 42000\ \eoe\newline
+\soe\ \ttoken{t=0m}\ \ttoken{DX}\ CN\ \eoe\newline
+\soe\ \ttoken{t=12m}\ \ttoken{Hipp}\ 6500\ \eoe\newline
+\soe\ \ttoken{t=12m}\ \ttoken{Vent}\ 48000\ \eoe\newline
+\soe\ \ttoken{t=12m}\ \ttoken{MMSE}\ 27\ \eoe\newline
+\soe\ \ttoken{t=12m}\ \ttoken{ADAS}\ 15\ \eoe\newline
+\soe\ \ttoken{t=12m}\ \ttoken{DX}\ MCI\ \eoe\newline
+\ttoken{TASK\_DX}\ \ttoken{h=12m}
+\\
+\midrule
+\multicolumn{1}{@{}l}{\textit{shortest context}} &
+\multicolumn{1}{l}{\textit{native block missingness}} &
+\multicolumn{1}{l@{}}{\textit{densest supervision}} \\
+\bottomrule
+\end{tabular}
+\caption{Two-visit patient history under the three granularities, each followed by the shared task prompt \ttoken{TASK\_DX}\ \ttoken{h=12m}. Visit~1 at $t{=}0$ has no cognitive scores; modality-level (M) drops the \ttoken{COG} sub-event, while (V) and (A) drop the missing features in place. All three share the template of Eq.~\eqref{eq:template} and differ only in how $E(\mathbf{x}_k)$ is decomposed.}
+\label{fig:granularity}
+\end{figure}
 
 \paragraph{(V) Visit-level encoding.}
 One event per visit.
