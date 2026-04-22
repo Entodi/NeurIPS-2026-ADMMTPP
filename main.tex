@@ -330,7 +330,7 @@ This is the most compact representation: a 10-visit TADPOLE patient uses roughly
 \paragraph{(M) Modality-level encoding.}
 One event per modality group observed at the visit.
 $E(\mathbf{x}_k)$ is split into $G$ sub-rows sharing a timestamp, each carrying only the features of its group (e.g., an imaging sub-event with MRI summaries, a cognitive sub-event with MMSE/CDRSB/ADAS).
-Missing modalities are omitted rather than flagged, yielding a native handling of block-structured missingness.
+Missing modalities are omitted rather than flagged with a missing-value token. A visit without a cognitive battery emits no cognitive sub-event.
 
 \paragraph{(A) Atomic-event encoding.}
 One event per individual measurement.
@@ -344,7 +344,7 @@ Task prompts are appended after the history as $\ttoken{TASK\_*} \, \ttoken{hori
 \label{sec:model}
 
 We use a causal language model $f_\theta$ as the backbone.
-Unless stated otherwise, $f_\theta$ is Qwen3.5-0.8B, loaded in 4-bit NF4 quantization. Scale-up to Qwen3.5-2B is reserved for follow-up and reported only when stated.
+Unless stated otherwise, $f_\theta$ is Qwen3.5-0.8B, loaded in 4-bit NormalFloat (NF4) quantization. Scale-up to Qwen3.5-2B is reserved for follow-up and reported only when stated.
 For variants that introduce new tokens (category labels, modality tags, horizon bins), we extend the tokenizer and resize the embedding and output-projection matrices. New rows are initialized to the mean of the pretrained rows.
 
 Trainable parameters are restricted to (i)~Low-Rank Adaptation \citep{hu2022lora} inserted in the attention and MLP projections ($\texttt{q,k,v,o\_proj}$, $\texttt{gate,up,down\_proj}$) as $W = W_0 + (\alpha/r)\, B A$ with $r=16$, $\alpha=64$, dropout $0.1$, and (ii)~the new token rows and the language-model head.
@@ -406,7 +406,7 @@ and $\mathcal{L}_{\text{aux}} = \mathcal{L}_{\text{NLL}}$ is the MTPP negative l
     \;=\; \int_0^{T} \sum_m \lambda_m(s)\, ds \;-\; \sum_{k=1}^{K} \log \lambda_{m_k}(t_k),
     \label{eq:nll}
 \end{equation}
-computed in closed form: the compensator decomposes into a baseline term $T\sum_m \mu_m$ and a sum of per-event excitation integrals $\frac{\alpha_m - \mu_m}{\beta_m}\bigl(1 - e^{-\beta_m (T - t_j)}\bigr)$~\citep{ogata1981lewis}.
+computed in closed form: the compensator (the integrated intensity $\int_0^T\sum_m \lambda_m(s)\,ds$, which is the first term of Eq.~\eqref{eq:nll}) decomposes into a baseline term $T\sum_m \mu_m$ and a sum of per-event excitation integrals $\frac{\alpha_m - \mu_m}{\beta_m}\bigl(1 - e^{-\beta_m (T - t_j)}\bigr)$~\citep{ogata1981lewis}.
 The implementation follows the \texttt{PiecewiseHawkesIntensity} interface of OpenFIM~\citep{berghaus2026incontext}.
 
 \paragraph{Cox proportional-hazards head.}
@@ -422,7 +422,7 @@ Within-batch ties are handled by the Breslow approximation~\citep{breslow1972con
 Two sub-variants are considered: an accumulated-risk-set form that buffers negatives across mini-batches~\citep{katzman2018deepsurv,kvamme2019time}, and an attention-pooled form in which $f$ reads an attention-weighted average over the history's hidden states rather than the last one, using the self-attentive pooling~\citep{lin2017structured}.
 
 \paragraph{Ordinal head.}
-Diagnosis labels admit a natural order CN\,$<$\,MCI\,$<$\,AD, so we additionally consider a two-logit ordinal head that minimizes cumulative binary cross-entropy on the thresholded predictions $P(d > \text{CN} \mid h_k)$ and $P(d > \text{MCI} \mid h_k)$, following the cumulative-link ordinal formulation~\citep{frank2001simple} and its deep-network version~\citep{niu2016ordinal}.
+Diagnosis labels admit a natural order CN\,$<$\,MCI\,$<$\,AD, so we additionally consider a two-logit ordinal head that minimizes cumulative binary cross-entropy on the thresholded predictions $P(d > \text{CN} \mid h_k)$ and $P(d > \text{MCI} \mid h_k)$, following the cumulative-link ordinal formulation of~\citet{frank2001simple} and its deep-network version~\citep{niu2016ordinal}, which casts a $K$-class ordinal problem as $K{-}1$ binary predictions $P(d > c_k)$ at each class threshold.
 This head carries no timing information. It tests whether an order-aware classification signal, independent of point-process structure, suffices to shape the hidden states.
 
 \section{Experiments}
@@ -435,13 +435,13 @@ Both datasets follow the same abstract schema $(t_k, \mathbf{x}_k)$ with $\mathb
 Prediction tasks are defined per dataset, as the two sources differ in the targets available.
 
 \paragraph{TADPOLE (ADNI).}
-The TADPOLE challenge subset of ADNI \citep{adni,marinescu2019tadpole} provides $\sim$1{,}700 patients in the training split (D1), each with at least two visits, and a held-out rollover split (D2).
+The TADPOLE challenge subset of ADNI \citep{adni,marinescu2019tadpole} provides $\sim$1{,}700 patients in the training split (D1), each with at least two visits, and a held-out rollover split (D2, later ADNI follow-up visits acquired after the challenge cut-off).
 Three static covariates $\mathbf{c}$ (sex, years of education, APOE-$\varepsilon$4 allele count) are emitted once per patient.
 Nine observation fields are available per visit: current age, diagnosis $d \in \{\text{CN}, \text{MCI}, \text{AD}\}$, three cognitive scores (MMSE, CDRSB, ADAS-13), three MRI volumes normalized as ratios to intracranial volume (ventricles, hippocampus, whole-brain), and ICV itself in milliliters.
 The (V) encoding emits all nine. The (M) and (A) encodings drop age and ICV-in-mL (they have no clean modality/feature tag) and emit the remaining seven grouped by modality or atomized by feature.
 Time since baseline $t$ (months) and inter-visit interval $\Delta t$ are attached as tokens at each event position.
 Preprocessing is light: raw MRI volumes are read from the ADNI FreeSurfer release, the three normalized volumes are computed as ratios to ICV, ICV is converted from mm$^3$ to mL, ADNI transition labels (e.g., \texttt{NL to MCI}, \texttt{MCI to Dementia}) are collapsed to the 3-way CN/MCI/AD taxonomy, and patients with fewer than two visits are dropped.
-Given a history $\Hcal_k$ and horizon $h>0$, we define five prediction tasks on TADPOLE: diagnosis at $h$ (3-way CN/MCI/AD), ADAS-Cog at $h$, ventricle-to-ICV ratio at $h$, inter-visit interval $\tau_{k+1}$, and multi-step trajectory generation by ancestral sampling.
+Given a history $\Hcal_k$ and horizon $h>0$, we define five prediction tasks on TADPOLE: diagnosis at $h$ (3-way CN/MCI/AD), ADAS-Cog at $h$, ventricle-to-ICV ratio at $h$, inter-visit interval $\tau_{k+1}$, and multi-step trajectory generation by ancestral sampling (drawing one event at a time from the model's conditional distribution and feeding each draw back as context for the next).
 Experiments in this paper report diagnosis. The remaining four are reserved for future work.
 We also consider a \emph{DX-hidden} ablation in which the diagnosis field is dropped from each visit event at training and inference, to measure how much of the TADPOLE signal passes through the cognitive and MRI fields alone.
 
@@ -449,12 +449,12 @@ We also consider a \emph{DX-hidden} ablation in which the diagnosis field is dro
 TADPOLE diagnosis is evaluated with 5-fold stratified group $k$-fold cross-validation on D1 (groups = patient IDs, seed~42), so that no patient appears in both train and validation.
 Each fold runs the full two-stage recipe (§\ref{sec:training}) and scores the held-out patients by balanced class accuracy (BCA) over the three classes \{CN, MCI, AD\}. BCA is used as the primary metric because ADNI is strongly class-imbalanced and random-chance accuracy would otherwise dominate a plain accuracy score.
 The D2 rollover split is held out as a secondary, temporally shifted test set.
-Across tokenization, prompt style, DX-hidden, auxiliary head, next-visit vs.\ horizon regime, and augmentation on/off, the Stage-2 sweep reaches 192 training runs per fold (48 mode-loss pairs $\times$ 2 augmentation settings $\times$ 2 regimes).
+Across tokenization, prompt style, DX-hidden, auxiliary head, next-visit vs.\ horizon regime, and augmentation on/off, the Stage-2 sweep reaches 192 training runs per fold (48 tokenization-by-auxiliary-head pairs $\times$ 2 augmentation settings $\times$ 2 regimes).
 
 \paragraph{EDUCATE.}
-EDUCATE is a tertiary-care electronic health record dataset covering dementia and related disorders, whose laboratory, medication, and diagnosis events we map to OMOP concepts via a project-specific vocabulary.
+EDUCATE is a tertiary-care electronic health record dataset covering dementia and related disorders, whose laboratory, medication, and diagnosis events we map to the OMOP Common Data Model (a standardized health-record vocabulary) via a project-specific crosswalk.
 Each patient has an irregular stream of diagnosis, laboratory, medication, and procedure events with absolute timestamps.
-Four prediction tasks are defined on EDUCATE: binary healthy/non-healthy classification on the full history, five-way class (AD, MCI, FTD, DLB, other) restricted to non-healthy patients, inter-visit interval $\tau_{k+1}$, and multi-step trajectory generation.
+Four prediction tasks are defined on EDUCATE: binary healthy/non-healthy classification on the full history, five-way class (AD, MCI, frontotemporal dementia (FTD), dementia with Lewy bodies (DLB), other) restricted to non-healthy patients, inter-visit interval $\tau_{k+1}$, and multi-step trajectory generation.
 Because diagnosis codes directly encode the class labels, the two classification tasks are additionally evaluated with a \emph{leak-safe} preprocess that removes all dementia/ADRD ICD-10 prefixes (G30, G31, F00--F03, $\ldots$) and SNOMED/text mentions at load time. Gaps between the two preprocess variants quantify code-level leakage.
 
 \paragraph{Decoding for diagnosis.}
@@ -497,14 +497,17 @@ We then run each encoding under each of the auxiliary heads (pure text, Hawkes N
 
 \appendix
 
-\section{Auxiliary Heads}
+\section{Appendix}
+\label{app:appendix}
+
+\subsection{Auxiliary Heads}
 \label{app:aux_heads}
 
 This appendix gives the formal definition of each auxiliary head of §\ref{sec:regularization}, matched to the \texttt{brainx} implementation.
 Notation: $h_k \in \mathbb{R}^d$ is the backbone's last hidden state at event position $k$. $t_k$ and $m_k$ are the event time and mark. $d_k \in \{0,1,2\}$ encodes diagnosis (CN, MCI, AD). $\sigma(\cdot)$ is the logistic function. $\mathcal{B}$ is a mini-batch of valid event positions.
 The pure-text baseline sets $\mathcal{L}_{\text{aux}} = 0$ in Eq.~\eqref{eq:combined}, so Stage~2 optimizes only the response-token cross-entropy $\mathcal{L}_{\text{S2}}$ of Eq.~\eqref{eq:loss_s2}. The subsections below cover the five heads that specify a non-trivial $\mathcal{L}_{\text{aux}}$.
 
-\subsection{Hawkes NLL (closed form)}
+\subsubsection{Hawkes NLL (closed form)}
 Small per-mark projections produce $(\mu_m^{(k)}, \alpha_m^{(k)}, \beta_m^{(k)}) = \mathrm{softplus}\bigl(W_{\{\mu,\alpha,\beta\},m}\, h_k\bigr)$ at every event position $k$.
 With the piecewise exponential intensity of Eq.~\eqref{eq:hawkes}, the compensator admits the closed form
 \begin{equation}
@@ -518,7 +521,7 @@ With the piecewise exponential intensity of Eq.~\eqref{eq:hawkes}, the compensat
 where $\mu_m^{(K)}$ is the baseline read off the last event.
 Summing over marks and subtracting the log-intensity at events yields $\mathcal{L}_{\text{NLL}}$ of Eq.~\eqref{eq:nll}~\citep{hawkes1971spectra,ogata1981lewis}.
 
-\subsection{Cox partial log-likelihood}
+\subsubsection{Cox partial log-likelihood}
 A scalar log-hazard $f(h_k) = w^\top h_k + b$ is read off the last hidden state at each event position, with $w \in \mathbb{R}^d$ and $b \in \mathbb{R}$.
 Events marking an observed class transition are labeled $\delta_k = 1$, otherwise $\delta_k = 0$.
 With times sorted descending and within-batch ties resolved by the Breslow approximation~\citep{breslow1972contribution,cox1972regression},
@@ -532,13 +535,13 @@ With times sorted descending and within-batch ties resolved by the Breslow appro
 \end{equation}
 where the risk set $\mathcal{R}(t_k) = \{j : t_j \geq t_k\}$ is evaluated via a descending-time cumulative log-sum-exp.
 
-\subsection{Cox with accumulated risk set}
-At small per-batch sizes the ranking signal in Eq.~\eqref{eq:cox_app} weakens.
-Following~\citep{katzman2018deepsurv,kvamme2019time}, we buffer $\{f(h_k), t_k, \delta_k\}$ across $N_{\text{acc}} = 4$ consecutive micro-batches and compute Eq.~\eqref{eq:cox_app} on the combined buffer, yielding an effective risk set of $|\mathcal{B}| \cdot N_{\text{acc}}$.
-Gradients flow only through the most recent micro-batch. Earlier entries are detached and provide ranking context.
-On non-flush steps, only the text loss is applied.
+\subsubsection{Cox with accumulated risk set}
+At small mini-batch sizes the ranking signal in Eq.~\eqref{eq:cox_app} weakens.
+Following~\citep{katzman2018deepsurv,kvamme2019time}, we buffer $\{f(h_k), t_k, \delta_k\}$ across $N_{\text{acc}} = 4$ consecutive mini-batches and compute Eq.~\eqref{eq:cox_app} on the combined buffer, which gives an effective risk set of $|\mathcal{B}| \cdot N_{\text{acc}}$.
+Gradients flow only through the most recent mini-batch. Earlier entries are detached and provide ranking context.
+The Cox loss is computed and back-propagated only at every $N_{\text{acc}}$-th step, when the buffer fills. On the intervening $N_{\text{acc}}{-}1$ steps only the text loss is applied.
 
-\subsection{Cox with attention-pooled hidden state}
+\subsubsection{Cox with attention-pooled hidden state}
 A learned query $q \in \mathbb{R}^d$ attends over the full history $\{h_1, \ldots, h_K\}$ via scaled dot-product attention,
 \begin{equation}
     \alpha_k
@@ -552,7 +555,7 @@ A learned query $q \in \mathbb{R}^d$ attends over the full history $\{h_1, \ldot
 after which the log-hazard is $f(\bar h) = w^\top \bar h + b$, following the self-attentive pooling of~\citet{lin2017structured}.
 Eq.~\eqref{eq:cox_app} is then applied on the attention-pooled log-hazards.
 
-\subsection{Ordinal cumulative BCE}
+\subsubsection{Ordinal cumulative BCE}
 A two-logit head $g: h_k \mapsto (z_{k,1}, z_{k,2}) \in \mathbb{R}^2$ parameterizes cumulative probabilities
 $P(d_k \geq 1 \mid h_k) = \sigma(z_{k,1})$ and $P(d_k \geq 2 \mid h_k) = \sigma(z_{k,2})$
 under the cumulative-link ordinal formulation~\citep{frank2001simple,niu2016ordinal}:
