@@ -183,6 +183,13 @@ ETHOS~\cite{renc2024zero} encodes patient timelines into a discrete ``health lan
 These models share our autoregressive view of a patient record but forgo the linguistic priors of a pretrained LLM and re-learn tokenization, model, and task heads together.
 Our variants retain the pretrained LLM via 4-bit quantization and LoRA adapters, so the only trainable structure specific to EHR is the vocabulary extension and the (optional) auxiliary heads.
 
+\subsection{EHR Foundation-Model Encoders and Generators}
+
+A parallel thread pretrains directly on structured EHR.
+Masked- and next-code encoders such as BEHRT~\cite{li2020behrt} and Med-BERT~\cite{rasmy2021med} adapt BERT-style pretraining to ICD and diagnosis-code sequences, and CLMBR~\cite{steinberg2021language} casts representation learning on EHR as next-code language modeling over large structured corpora.
+On the generative side, Foresight~\cite{kraljevic2024foresight} trains a GPT-style transformer on patient timelines for open-ended trajectory forecasting, conceptually close to ETHOS and ARES.
+These four share our autoregressive or masked-LM view of a patient record but differ from our setup in three ways: they pretrain the tokenizer and the model together from scratch on structured codes, they do not expose a point-process log-likelihood surrogate, and they do not keep the linguistic priors of a general-purpose pretrained LLM.
+
 \section{Method}
 \label{sec:method}
 
