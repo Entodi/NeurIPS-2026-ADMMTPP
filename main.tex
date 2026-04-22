@@ -55,6 +55,7 @@
 \usepackage{amsmath}        % align, equation environments
 \usepackage{amssymb}        % \mathbb, \mathcal
 \usepackage{amsfonts}       % blackboard math symbols
+\usepackage{dsfont}         % \mathds{1} for indicator functions
 \usepackage{nicefrac}       % compact symbols for 1/2, etc.
 \usepackage{microtype}      % microtypography
 \usepackage{xcolor}         % colors
@@ -243,7 +244,9 @@ All variants share a structural template for each patient:
     \eos,
     \label{eq:template}
 \end{equation}
-and differ in how the event payload $E(\mathbf{x}_k)$ is decomposed and, as a secondary consequence, in which continuous covariates can cleanly enter an event (the modality-level and atomic-event encodings restrict events to measurements with a natural modality/feature tag, so quantities such as age and raw intracranial volume are dropped in those two variants).
+where \soe/\eoe\ are abstract event delimiters, not learned vocabulary items: in implementation they are realized as newline boundaries plus the encoding-specific event prefix that opens each $E(\mathbf{x}_k)$ block (an event index $e_k\mid$ for (V), a modality tag $\langle g\rangle\mid$ for (M), a feature tag $\langle\text{feat}\rangle\mid$ for (A)).
+The tokenizer already treats the newline as a separator, so no custom delimiter tokens are added to the vocabulary; the only added items are the modality/feature tags and the task prompts ($\ttoken{TASK\_*}$, $\ttoken{h}$, etc.).
+The three variants differ in how the event payload $E(\mathbf{x}_k)$ is decomposed and, as a secondary consequence, in which continuous covariates can cleanly enter an event (the modality-level and atomic-event encodings restrict events to measurements with a natural modality/feature tag, so quantities such as age and raw intracranial volume are dropped in those two variants).
 The three variants trade off context length against the density of supervision (fraction of tokens under a cross-entropy loss whose prefix varies across visits).
 Let $F$ denote the number of observed feature dimensions at visit $k$ and $G$ the number of modality groups: for TADPOLE, $G$ covers imaging, cognitive, and diagnosis; for EDUCATE, $G$ covers diagnosis, lab, medication, and procedure.
 Figure~\ref{fig:granularity} shows the same two-visit history under each variant.
@@ -550,8 +553,8 @@ under the cumulative-link ordinal formulation~\citep{frank2001simple,niu2016ordi
     \mathcal{L}_{\text{ord}}
     \;=\; \frac{1}{2|\mathcal{B}|} \sum_{k \in \mathcal{B}}\!
     \Bigl[\,
-      \mathrm{BCE}\!\bigl(z_{k,1},\, \mathbb{1}[d_k \geq 1]\bigr)
-    + \mathrm{BCE}\!\bigl(z_{k,2},\, \mathbb{1}[d_k \geq 2]\bigr)
+      \mathrm{BCE}\!\bigl(z_{k,1},\, \mathds{1}[d_k \geq 1]\bigr)
+    + \mathrm{BCE}\!\bigl(z_{k,2},\, \mathds{1}[d_k \geq 2]\bigr)
     \,\Bigr].
     \label{eq:ord}
 \end{equation}
