@@ -235,7 +235,7 @@ Rather than parameterize $\lambda^*$ directly, we serialize the record into a to
     \;\longmapsto\;
     s_{1:L} \;=\; \bigl(s^{(c)},\, s^{(1)},\, \ldots,\, s^{(K)}\bigr),
 \]
-where $s^{(c)}$ encodes the static context and each event block $s^{(k)}$ encodes the inter-event time $\tau_k$ and mark $\mathbf{x}_k$ of visit $k$ (Section~\ref{sec:tokenization}).
+where $s^{(c)}$ encodes the static context and each event block $s^{(k)}$ encodes the visit time $t_k$ (months from baseline) and mark $\mathbf{x}_k$ of visit $k$, with $\tau_k$ recovered as the difference of successive time tokens (Section~\ref{sec:tokenization}).
 An autoregressive language model factorizes $s_{1:L}$ by the chain rule, which we regroup by event blocks:
 \begin{equation}
     p_\theta(s_{1:L})
@@ -325,7 +325,7 @@ mmse=27\textbar adas13=15\ \eoe\newline
 \multicolumn{1}{l@{}}{\textit{densest supervision}} \\
 \bottomrule
 \end{tabular}
-\caption{Two-visit patient history under the three granularities, with static context (sex, education, APOE-$\varepsilon$4) emitted once and MRI volumes reported as ratios to intracranial volume. Visit~1 at $t{=}0$ has no cognitive scores. Modality-level (M) drops the \ttoken{cognitive} sub-event, while (V) and (A) drop the missing features in place. The (V) encoding additionally emits current age and ICV (in mL) per visit. These are omitted by the modality-grouped (M) and atomic (A) encodings, which restrict events to measurements with a natural modality/feature tag. All three share the template of Eq.~\eqref{eq:template} and differ in how $E(\mathbf{x}_k)$ is decomposed and which fields it covers. The trailing task prompt \ttoken{TASK\_DX}\,\ttoken{h=12m} and the target response (here \texttt{AD}) are used only in Stage~2 supervised fine-tuning (\S\ref{sec:training}), where the cross-entropy loss is restricted to the response tokens. Stage~1 continued pretraining uses only the history portion, ending at the final \eoe\ of the last observed visit.}
+\caption{Two-visit patient history under the three granularities, with static context (sex, education, APOE-$\varepsilon$4) emitted once and MRI volumes reported as ratios to intracranial volume. Time tokens \ttoken{t=Xm} denote elapsed months from baseline (so $\tau_k$ is recovered as the difference between successive time tokens), while horizon tokens \ttoken{h=Xm} in the task prompt are offsets from the last observed visit. Visit~1 at $t{=}0$ has no cognitive scores. Modality-level (M) drops the \ttoken{cognitive} sub-event, while (V) and (A) drop the missing features in place. The (V) encoding additionally emits current age and ICV (in mL) per visit. These are omitted by the modality-grouped (M) and atomic (A) encodings, which restrict events to measurements with a natural modality/feature tag. All three share the template of Eq.~\eqref{eq:template} and differ in how $E(\mathbf{x}_k)$ is decomposed and which fields it covers. The trailing task prompt \ttoken{TASK\_DX}\,\ttoken{h=12m} and the target response (here \texttt{AD}) are used only in Stage~2 supervised fine-tuning (\S\ref{sec:training}), where the cross-entropy loss is restricted to the response tokens. Stage~1 continued pretraining uses only the history portion, ending at the final \eoe\ of the last observed visit.}
 \label{fig:granularity}
 \end{figure}
 
@@ -341,7 +341,7 @@ Missing modalities are omitted rather than flagged with a missing-value token. A
 
 \paragraph{(A) Atomic-event encoding.}
 One event per individual measurement.
-$E(\mathbf{x}_k)$ is decomposed into $F$ single-feature events of the form \ttoken{feat}$\;|\;t\;|\;v$.
+$E(\mathbf{x}_k)$ is decomposed into $F$ single-feature blocks of the form $\ttoken{feat}\,v$, each emitted as its own event $\soe\,T(\tau_k)\,\ttoken{feat}\,v\,\eoe$ sharing the visit's time token.
 This gives the finest per-token supervision (one loss boundary per measurement) and the cleanest treatment of feature-wise missingness, at the cost of $F{-}1$ extra timestamp repetitions per visit.
 
 Numerical values are emitted as text at the backbone tokenizer's native resolution. Categorical labels (diagnosis, ICD/SNOMED codes) use a small set of added vocabulary items that we insert into the tokenizer and initialize from the mean of existing embeddings.
@@ -590,6 +590,106 @@ Crossing the 48 pairs with 2 augmentation settings and 2 target regimes (next-vi
 \label{app:hparams}
 
 Both stages use learning rate $10^{-4}$ and per-device batch size $4$ on a single A100 80\,GB GPU. Stage~1 runs for 7 epochs without augmentation and 9 epochs with augmentation. Stage~2 runs for 4 epochs without augmentation and 5 epochs with augmentation. When augmentation is enabled, it applies 10\% modality dropout, 2\% feature-value noise, and 15\% history dropout to the training sequences. For the auxiliary-head combined objective of Eq.~\eqref{eq:combined}, $\gamma$ is linearly warmed from $0$ to $0.1$ over one epoch.
+
+\subsection{Baselines and Comparators}
+\label{app:baselines}
+
+The baselines below are organized by the design choice they isolate. Tier-1 entries distinguish the central claims of the paper; Tier-2 entries strengthen the comparison without being load-bearing.
+
+\paragraph{Time-collapsing baselines (Tier 1).}
+[Placeholder: TADPOLE-style XGBoost/MLP fit on per-visit feature vectors (last visit, last-$K$-mean, linear-trend slope), and a Cerebra-style multimodal max-pool over visits with per-modality embeddings, both at the same TADPOLE D1 / D2 split. Tests whether retaining the time axis matters relative to the closest cross-sectional and time-collapsed multimodal alternatives.]
+
+\paragraph{From-scratch generative EHR LM (Tier 1).}
+[Placeholder: same vocabulary and a matched decoder-only architecture trained from scratch under the Stage-1 next-token objective, no pretrained weights, no LoRA. Isolates the contribution of the pretrained linguistic priors at otherwise matched tokenizer and recipe.]
+
+\paragraph{Closest LLM-coupled TPP comparators (Tier 1).}
+[Placeholder: TPP-LLM~\citep{liu2025tpp} (continuous time positional encoding plus softplus intensity head as the primary output) and Language-TPP~\citep{kong2025language} (byte-token timestamps), both fine-tuned on the same ADRD splits with the same backbone family. Tests the value of inter-event-token time and auxiliary-head-only intensity relative to the directly adjacent prior work.]
+
+\paragraph{Pseudo-note and frozen-encoder baselines (Tier 2).}
+[Placeholder: MEME-style~\citep{lee2025clinical} per-modality templated prose with a frozen MedBERT/MedGemma encoder per modality, concatenated and passed through a light classifier head; and a frozen summarize-then-embed pipeline in the spirit of recent portability-oriented work, with a frozen LLM summarizer and a frozen text embedder feeding a light head. Tests whether structured tokenization and end-to-end LoRA-tuning beat prose-based and frozen-encoder pipelines on the same tasks.]
+
+\paragraph{Encoder-only EHR foundation models (Tier 2).}
+[Placeholder: BEHRT~\citep{li2020behrt}- and Med-BERT~\citep{rasmy2021med}-style masked-LM pretraining on the same tokenized stream, followed by a classification head. Tests whether decoder-only generative pretraining is necessary for ADRD diagnosis or whether MLM pretraining suffices.]
+
+\paragraph{Conventional neural TPPs (Tier 2).}
+[Placeholder: IFTPP and AttNHP with diagnosis as the categorical mark, restricted to the diagnosis-only event stream. Calibrates the LLM-coupled approach against the pre-LLM neural TPP literature.]
+
+\paragraph{Foundation-prior TPP and time-series baselines (Tier 2).}
+[Placeholder: OpenFIM/FIM-PP~\citep{berghaus2026incontext} run zero-shot on the diagnosis-mark stream, and a TimesFM-based forecasting baseline with a downstream diagnosis head. Tests whether a synthetic-prior foundation TPP and a frozen time-series foundation model are competitive on real ADRD trajectories.]
+
+\subsection{Extended Ablations}
+\label{app:extra_ablations}
+
+The ablations of \S\ref{sec:results} cover the primary axes (tokenization, prompt style, auxiliary head, augmentation, target regime, DX visibility). The experiments below extend that grid along secondary axes that the current sweep does not vary.
+
+\paragraph{Backbone scale.}
+[Placeholder: BCA across Qwen3.5-\{0.5, 0.8, 2\}B at fixed adaptation, tokenization, and recipe.]
+
+\paragraph{Pretrained vs from-scratch backbone.}
+[Placeholder: paired comparison at otherwise matched architecture and tokenizer; shared with the from-scratch baseline of Appendix~\ref{app:baselines}.]
+
+\paragraph{Time-token resolution.}
+[Placeholder: BCA across month, quarter, quantile-based, and byte-level discretizations of $T(\tau_k)$, holding the rest of the tokenizer fixed.]
+
+\paragraph{Vocabulary extension.}
+[Placeholder: dedicated added tokens for category labels and modality/feature tags vs.\ encoding all tags as multi-token strings under the unmodified base tokenizer.]
+
+\paragraph{LoRA configuration.}
+[Placeholder: rank $r \in \{8, 16, 32\}$, attention-only vs.\ attention$+$MLP target modules, and their interaction with backbone scale.]
+
+\paragraph{Stage-1 only vs Stage-1+2.}
+[Placeholder: zero-shot read-off from the Stage-1 checkpoint vs.\ after Stage-2 SFT, at fixed encoding and auxiliary-head choice. Reuses the existing Stage-1 checkpoints.]
+
+\paragraph{Auxiliary-head weight.}
+[Placeholder: $\gamma \in \{0.05, 0.1, 0.2\}$ with and without linear warm-up.]
+
+\paragraph{Sub-sequence augmentation.}
+[Placeholder: all-prefixes (current default) vs.\ full-history-only vs.\ random-prefix-subset Stage-1 schedules.]
+
+\paragraph{Static-context placement.}
+[Placeholder: prefix-only (current default) vs.\ interleaved at every visit, to test whether the LM forgets static covariates over long contexts.]
+
+\paragraph{Multi-head combinations.}
+[Placeholder: paired auxiliary heads (Hawkes$+$ordinal, Cox$+$ordinal) at $\gamma=0.1$ each, to test whether timing and ordinal signals are complementary.]
+
+\subsection{Generalization and Robustness}
+\label{app:generalization}
+
+\paragraph{Cross-cohort transfer.}
+[Placeholder: train on TADPOLE D1 and zero-shot evaluate on EDUCATE under the leak-safe preprocess (and the reverse direction) for the overlapping diagnosis tasks. Reported as BCA on the target cohort, alongside the in-cohort upper bound.]
+
+\paragraph{Few-shot adaptation.}
+[Placeholder: source-pretrained model fine-tuned on $N \in \{16, 64, 256\}$ target-cohort patients; report the BCA curve and contrast with the in-distribution upper bound.]
+
+\paragraph{Code-leakage gap on EDUCATE.}
+[Placeholder: leak-safe vs leak-permissive preprocess for the binary and 5-way classification tasks, with the gap reported as a code-leakage estimate.]
+
+\paragraph{Effective context length.}
+[Placeholder: BCA as a function of the number of visits $K$ in the input history, at fixed model. Distinguishes long-history use from last-visit pattern matching.]
+
+\paragraph{D2 rollover (temporal shift).}
+[Placeholder: BCA on the D2 rollover split alongside the D1 5-fold mean, reported for the headline configuration.]
+
+\subsection{Auxiliary Diagnostics}
+\label{app:diagnostics}
+
+\paragraph{Probability calibration of diagnosis.}
+[Placeholder: expected calibration error (ECE) and reliability diagrams at horizons $h \in \{6, 12, 24, 36\}$ months for the best encoding/auxiliary-head pair, compared to the pure-text baseline. The ordinal head is expected to give the largest calibration improvement.]
+
+\paragraph{Inter-event time calibration.}
+[Placeholder: probability integral transform (PIT) histogram for $\hat\tau_{k+1}$ on held-out histories. Uniformity is the standard MTPP-calibration check and validates the discretized-NLL surrogate of \S\ref{sec:problem}.]
+
+\paragraph{Trajectory generation.}
+[Placeholder: per-event NLL on held-out true continuations, Wasserstein distance between sampled and true biomarker trajectories at horizons $\{12, 24, 36\}$ months, and (optionally) clinician-rated plausibility on a small sample of generated trajectories.]
+
+\paragraph{Subgroup performance.}
+[Placeholder: BCA stratified by APOE-$\varepsilon$4 carrier status, sex, and education quartile.]
+
+\paragraph{Token-level attribution.}
+[Placeholder: leave-one-token-out $\Delta$BCA ranking for the best configuration, in the style of ARES~\citep{renc2025foundation}, to identify which tokens carry the predictive signal.]
+
+\paragraph{Compute and efficiency.}
+[Placeholder: training FLOPs, wall-clock per fold, and inference latency for one diagnosis prediction across encodings and backbone scales, alongside the same metrics for the Tier-1 baselines.]
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
