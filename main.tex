@@ -617,6 +617,9 @@ The baselines below are organized by the design choice they isolate. Tier-1 entr
 \paragraph{Time-collapsing baselines (Tier 1).}
 [Placeholder: TADPOLE-style XGBoost/MLP fit on per-visit feature vectors (last visit, last-$K$-mean, linear-trend slope), and a Cerebra-style multimodal max-pool over visits with per-modality embeddings, both at the same TADPOLE D1 / D2 split. Tests whether retaining the time axis matters relative to the closest cross-sectional and time-collapsed multimodal alternatives.]
 
+\paragraph{Cross-sectional tabular foundation-model baselines (Tier 1).}
+[Placeholder: L2C-TabPFN~\citep{l2ctabpfn2025} applies a Longitudinal-to-Cross-sectional (L2C) transformation — per-feature aggregation up to a time anchor (last visit, mean, linear-trend slope, time-of-min/max) — and feeds the resulting fixed-length vector to TabPFN~\citep{hollmann2025tabpfn}. To avoid characterising the tabular foundation-model family by a single backbone, we run the same L2C input under three contemporary tabular FMs — TabPFN v2~\citep{hollmann2025tabpfn}, TabICL~\citep{qu2025tabicl}, and TabDPT~\citep{ma2024tabdpt} — alongside the L2C+XGBoost reference, on the TADPOLE D1/D2 splits and the EDUCATE binary/5-way classification tasks. This isolates the contribution of \emph{keeping the trajectory in the representation} from the contribution of the tabular foundation prior alone, and addresses a recurring reviewer concern that single-TabFM evaluations are not representative of the family.]
+
 \paragraph{From-scratch generative EHR LM (Tier 1).}
 [Placeholder: same vocabulary and a matched decoder-only architecture trained from scratch under the Stage-1 next-token objective, no pretrained weights, no LoRA. Isolates the contribution of the pretrained linguistic priors at otherwise matched tokenizer and recipe.]
 

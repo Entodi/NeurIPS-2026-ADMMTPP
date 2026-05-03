@@ -27,6 +27,7 @@ For each paper artifact: what already exists in `brainx/`, and what's missing. N
 | Baseline | In brainx | Gap |
 |---|---|---|
 | XGBoost (last visit / last-K-mean / slope) | `scripts/train_xgboost_baseline.py` (split + horizon parity with adni_20260409) | run on TADPOLE D1 + D2 + EDUCATE; report numbers |
+| L2C + {TabPFN v2, TabICL, TabDPT, XGBoost} | L2C transform exists in user's own L2C-TabPFN repo; `admmtpp/model_cards/tabpfn_ts_approach_{a,b,c}.md` | wire 3 TabFMs into eval harness; pre-empts the "single TabFM" reviewer critique on L2C-TabPFN — see `literature/l2c_tabpfn_notes.md` |
 | Cerebra-style max-pool over visits | — | implement (per-modality embed → max-pool → MLP head); 1 day |
 | TPP-LLM on same splits | — | clone github.com/tppllm, fine-tune on TADPOLE + EDUCATE; 2–4 days |
 | Language-TPP on same splits | — | clone github.com/qykong/Language-TPP, same; 2–4 days, *probably skip — pick one of the two* |
