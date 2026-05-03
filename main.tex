@@ -152,9 +152,9 @@ Within this setup we compare three tokenization granularities, visit-level, moda
 
 \paragraph{Contributions.}
 \begin{itemize}[leftmargin=*,itemsep=2pt,topsep=2pt]
-    \item A generative representation-learning setup for multimodal ADRD trajectories in which a pretrained LLM backbone serves as a shared multimodal encoder under a point-process objective, with a formal link from token-level cross-entropy to the MTPP log-likelihood (§\ref{sec:problem}).
-    \item Three tokenization variants, visit, modality, and atomic-event, that trade context length against per-event supervision density at an otherwise identical backbone, adaptation, and training objective (§\ref{sec:tokenization}).
-    \item A suite of auxiliary heads (Hawkes NLL, Cox partial likelihood, ordinal regression) on the backbone's hidden states (§\ref{sec:regularization}) as different ways to shape the learned representation, evaluated against a pure next-token baseline.
+    \item An instantiation of the LLM-coupled MTPP formulation of \citet{kong2025language,liu2025tpp} for multimodal clinical event streams, with explicit treatment of the discretization that the language-model tokenizer induces on the continuous mark space (§\ref{sec:problem}).
+    \item Three tokenization variants, visit, modality, and atomic-event, that trade context length against per-event supervision density at an otherwise identical backbone, adaptation, and training objective (§\ref{sec:tokenization}); to our knowledge the first controlled granularity ablation in the LLM-coupled TPP family.
+    \item Auxiliary heads (Hawkes NLL, Cox partial likelihood with two pooling variants, ordinal cumulative-link) on the backbone's hidden states (§\ref{sec:regularization}) as \emph{representation-shaping} objectives rather than primary outputs; to our knowledge the first use of survival and ordinal objectives in an LLM-coupled TPP, evaluated against a pure next-token baseline.
     \item An empirical study on two ADRD cohorts, the TADPOLE subset of ADNI~\citep{adni,marinescu2019tadpole} and the tertiary-care EHR dataset EDUCATE, jointly ablating tokenization granularity and the auxiliary-head choice at fixed backbone, adaptation, and training recipe.
 \end{itemize}
 
@@ -174,7 +174,7 @@ Marked temporal point processes have long been the standard tool for irregular e
 More recently, several works have tied TPPs to language-model backbones.
 LanguageTPP~\citep{kong2025language} and TPP-LLM~\citep{liu2025tpp} cast next-event prediction as next-token prediction over a serialized event stream, using an LLM either to emit event distributions directly or to feed an intensity head on top of its hidden states.
 MM-TPP~\citep{li2026longrange} extends this line to multi-modal marks, and OpenFIM~\citep{berghaus2026incontext} proposes a foundation intensity model trained on a broad mixture of heterogeneous event streams.
-Our work sits in the LLM-coupled family but targets the ADRD application and is distinguished by (i) a controlled ablation over \emph{tokenization granularity} at fixed backbone, adaptation, and training objective, and (ii) treatment of auxiliary heads (intensity, hazard, ordinal) as representation-shaping objectives on the hidden state (§\ref{sec:regularization}) rather than primary outputs, so that the same model answers both discrete and time-valued tasks by next-token prediction.
+Our work sits in the LLM-coupled family but targets the ADRD application and isolates two axes that the prior LLM-TPP papers leave fixed: tokenization granularity (§\ref{sec:tokenization}) and the choice of representation-shaping auxiliary objective on the hidden state (§\ref{sec:regularization}). The same backbone answers both discrete and time-valued tasks by next-token decoding, so the auxiliary heads supervise the representation rather than serve as primary predictors.
 
 \subsection{LLM Fine-Tuning on EHR Pseudo-Notes}
 
@@ -213,14 +213,25 @@ Let $\mathcal{S} = \{(t_k, \mathbf{x}_k)\}_{k=1}^{K}$ denote a patient record wi
 Time-invariant covariates (sex, years of education, APOE-$\varepsilon$4 allele count) are collected in a context vector $\mathbf{c}$. Age is treated as a per-visit feature.
 We write $\Hcal_k = \{(\mathbf{c}, (t_1, \mathbf{x}_1), \ldots, (t_k, \mathbf{x}_k))\}$ for the history up to and including the $k$-th observation and $\tau_k = t_k - t_{k-1}$ for the inter-observation interval.
 
-A marked temporal point process is characterized by the conditional density of the next event given the history~\citep{daley2003introduction,shchur2021neural},
+A marked temporal point process is most naturally specified by its \emph{conditional intensity}, the limiting per-unit-time conditional rate at which marked events occur given the history~\citep{daley2003introduction,kong2025language},
+\begin{equation}
+    \lambda^*(t, \mathbf{x} \mid \Hcal_{t^-})
+    \;=\; \lim_{\delta t \downarrow 0}
+    \frac{\Pr\!\bigl(\text{event with mark } \mathbf{x}
+                     \text{ in } [t, t+\delta t)
+                     \,\big|\, \Hcal_{t^-}\bigr)}{\delta t},
+    \label{eq:intensity_def}
+\end{equation}
+where $\Hcal_{t^-}$ is the history strictly before $t$ and the $^*$ marks conditioning on that history~\citep{shchur2021neural}.
+Two pieces follow from \eqref{eq:intensity_def} by the standard survival argument. The probability of \emph{no} event in $(t_k, t_{k+1})$ is
+$\exp\!\bigl(-\!\!\int_{t_k}^{t_{k+1}}\!\!\int\lambda^*(s, \mathbf{x})\,d\mathbf{x}\,ds\bigr)$,
+and the rate at $(t_{k+1}, \mathbf{x}_{k+1})$ conditional on that survival is $\lambda^*(t_{k+1}, \mathbf{x}_{k+1})$, so the conditional density of the next event is the product of the two,
 \begin{equation}
     p^*(t_{k+1}, \mathbf{x}_{k+1} \mid \Hcal_k)
     \;=\; \lambda^*(t_{k+1}, \mathbf{x}_{k+1}) \,
-          \exp\!\Bigl(-\!\!\int_{t_k}^{t_{k+1}}\!\!\int \lambda^*(s, \mathbf{x})\,d\mathbf{x}\,ds\Bigr),
+          \exp\!\Bigl(-\!\!\int_{t_k}^{t_{k+1}}\!\!\int \lambda^*(s, \mathbf{x})\,d\mathbf{x}\,ds\Bigr).
     \label{eq:mtpp}
 \end{equation}
-with conditional intensity $\lambda^*(\cdot \mid \Hcal_k)$.
 Iterating the chain rule, the joint density of a full record factorizes into per-event conditionals,
 \begin{equation}
     p^*\!\bigl(\{(\tau_k, \mathbf{x}_k)\}_{k=1}^{K} \,\big|\, \mathbf{c}\bigr)
@@ -243,8 +254,15 @@ An autoregressive language model factorizes $s_{1:L}$ by the chain rule, which w
     \;=\; p_\theta\!\bigl(s^{(c)}\bigr) \prod_{k=1}^{K} p_\theta\!\bigl(s^{(k)} \,\big|\, s^{(c)}, s^{(<k)}\bigr).
     \label{eq:ar}
 \end{equation}
-Because $\phi$ is injective on its image, each event-block factor $p_\theta\!\bigl(s^{(k)} \mid s^{(c)}, s^{(<k)}\bigr)$ is a parametric surrogate for the MTPP conditional $p^*(\tau_k, \mathbf{x}_k \mid \Hcal_{k-1})$, with continuous marks resolved to the tokenizer's numeric precision.
-Token-level cross-entropy on $s_{1:L}$ therefore minimizes a discretized negative log-likelihood of Eq.~\eqref{eq:mtpp_joint}~\citep{liu2025tpp,kong2025language}.
+Because $\phi$ is injective and rounds each continuous mark to the cell of the tokenizer's numeric grid that contains it, the event-block factor satisfies
+\begin{equation}
+    p_\theta\!\bigl(s^{(k)} \,\big|\, s^{(c)}, s^{(<k)}\bigr)
+    \;=\; \int_{\phi^{-1}(s^{(k)})}\!\!
+          \tilde p_\theta\!\bigl(\tau, \mathbf{x} \,\big|\, \Hcal_{k-1}\bigr) \,d\tau\,d\mathbf{x},
+    \label{eq:cell}
+\end{equation}
+i.e.\ the language model places mass on the $(\tau, \mathbf{x})$-cell that $\phi$ maps to that token block. Eq.~\eqref{eq:cell} is the precise discrete analogue of the MTPP conditional $p^*(\tau_k, \mathbf{x}_k \mid \Hcal_{k-1})$, with discretization error bounded by the diameter of the largest tokenizer cell.
+Token-level cross-entropy on $s_{1:L}$ is then, via Eq.~\eqref{eq:ar}, the sum of the negative log-probabilities assigned to these cells, and so minimizes a discretized version of the joint NLL of Eq.~\eqref{eq:mtpp_joint}~\citep{liu2025tpp,kong2025language}.
 This reformulation (i)~reuses a pretrained language-model backbone in place of a bespoke intensity network, (ii)~handles heterogeneous marks (categorical, ordinal, and continuous) under a single objective, and (iii)~unifies classification, regression, and forecasting as conditional next-token prediction.
 
 \subsection{Three Granularity Variants}
